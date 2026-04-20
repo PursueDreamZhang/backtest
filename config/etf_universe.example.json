@@ -1,0 +1,46 @@
+{
+  "etfs": [
+    {
+      "symbol": "510300",
+      "name": "沪深300ETF",
+      "tags": ["宽基", "大盘"],
+      "is_market_proxy": true,
+      "is_theme_proxy": false
+    },
+    {
+      "symbol": "512100",
+      "name": "中证1000ETF",
+      "tags": ["宽基", "中小盘"],
+      "is_market_proxy": true,
+      "is_theme_proxy": false
+    },
+    {
+      "symbol": "159915",
+      "name": "创业板ETF",
+      "tags": ["成长", "创业板"],
+      "is_market_proxy": true,
+      "is_theme_proxy": false
+    },
+    {
+      "symbol": "512480",
+      "name": "半导体ETF",
+      "tags": ["科技", "半导体"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "512010",
+      "name": "医药ETF",
+      "tags": ["医药"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "512660",
+      "name": "军工ETF",
+      "tags": ["军工"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    }
+  ]
+}

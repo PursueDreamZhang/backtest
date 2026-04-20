@@ -1,0 +1,13 @@
+{
+  "positions": [
+    {
+      "symbol": "000977",
+      "shares": 1000,
+      "note": "示例持仓"
+    },
+    {
+      "symbol": "688072",
+      "shares": 200
+    }
+  ]
+}
