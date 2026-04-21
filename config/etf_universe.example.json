@@ -1,44 +1,233 @@
 {
   "etfs": [
     {
-      "symbol": "510300",
-      "name": "沪深300ETF",
-      "tags": ["宽基", "大盘"],
+      "symbol": "510050",
+      "name": "上证50ETF华夏",
+      "tags": ["市场代理", "宽基", "上证50", "大盘蓝筹"],
       "is_market_proxy": true,
       "is_theme_proxy": false
     },
     {
-      "symbol": "512100",
-      "name": "中证1000ETF",
-      "tags": ["宽基", "中小盘"],
+      "symbol": "159919",
+      "name": "沪深300ETF嘉实",
+      "tags": ["市场代理", "宽基", "沪深300", "核心龙头"],
+      "is_market_proxy": true,
+      "is_theme_proxy": false
+    },
+    {
+      "symbol": "510500",
+      "name": "中证500ETF南方",
+      "tags": ["市场代理", "宽基", "中证500", "中盘"],
+      "is_market_proxy": true,
+      "is_theme_proxy": false
+    },
+    {
+      "symbol": "159845",
+      "name": "中证1000ETF华夏",
+      "tags": ["市场代理", "宽基", "中证1000", "中小盘成长"],
+      "is_market_proxy": true,
+      "is_theme_proxy": false
+    },
+    {
+      "symbol": "563300",
+      "name": "中证2000ETF华泰柏瑞",
+      "tags": ["市场代理", "宽基", "中证2000", "微盘"],
       "is_market_proxy": true,
       "is_theme_proxy": false
     },
     {
       "symbol": "159915",
-      "name": "创业板ETF",
-      "tags": ["成长", "创业板"],
+      "name": "创业板ETF易方达",
+      "tags": ["市场代理", "宽基", "创业板", "成长"],
       "is_market_proxy": true,
       "is_theme_proxy": false
     },
     {
-      "symbol": "512480",
-      "name": "半导体ETF",
-      "tags": ["科技", "半导体"],
+      "symbol": "588060",
+      "name": "科创50ETF广发",
+      "tags": ["市场代理", "宽基", "科创50", "科创板"],
+      "is_market_proxy": true,
+      "is_theme_proxy": false
+    },
+    {
+      "symbol": "159783",
+      "name": "科创创业50ETF华夏",
+      "tags": ["市场代理", "宽基", "科创创业50", "双创"],
+      "is_market_proxy": true,
+      "is_theme_proxy": false
+    },
+    {
+      "symbol": "159352",
+      "name": "A500ETF南方",
+      "tags": ["市场代理", "宽基", "中证A500", "核心宽基"],
+      "is_market_proxy": true,
+      "is_theme_proxy": false
+    },
+    {
+      "symbol": "560350",
+      "name": "中证A50ETF摩根",
+      "tags": ["市场代理", "宽基", "中证A50", "大盘龙头"],
+      "is_market_proxy": true,
+      "is_theme_proxy": false
+    },
+    {
+      "symbol": "515290",
+      "name": "银行ETF天弘",
+      "tags": ["金融", "银行"],
       "is_market_proxy": false,
       "is_theme_proxy": true
     },
     {
-      "symbol": "512010",
-      "name": "医药ETF",
-      "tags": ["医药"],
+      "symbol": "159842",
+      "name": "券商ETF银华",
+      "tags": ["金融", "非银金融", "券商"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "515880",
+      "name": "通信ETF国泰",
+      "tags": ["TMT", "通信"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "512980",
+      "name": "传媒ETF广发",
+      "tags": ["TMT", "传媒"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "159998",
+      "name": "计算机ETF天弘",
+      "tags": ["TMT", "计算机"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "159997",
+      "name": "电子ETF天弘",
+      "tags": ["TMT", "电子"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "159876",
+      "name": "有色龙头ETF",
+      "tags": ["周期", "有色金属"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "515170",
+      "name": "食品饮料ETF华夏",
+      "tags": ["消费", "食品饮料"],
       "is_market_proxy": false,
       "is_theme_proxy": true
     },
     {
       "symbol": "512660",
-      "name": "军工ETF",
-      "tags": ["军工"],
+      "name": "军工ETF国泰",
+      "tags": ["国防军工", "军工"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "512010",
+      "name": "医药ETF易方达",
+      "tags": ["医药"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "516550",
+      "name": "农业ETF嘉实",
+      "tags": ["农林牧渔", "农业"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "159768",
+      "name": "房地产ETF银华",
+      "tags": ["地产", "房地产"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "562510",
+      "name": "旅游ETF华夏",
+      "tags": ["社会服务", "旅游"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "561360",
+      "name": "石油ETF国泰",
+      "tags": ["能源", "石油石化"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "512580",
+      "name": "环保ETF广发",
+      "tags": ["环保"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "515210",
+      "name": "钢铁ETF国泰",
+      "tags": ["周期", "钢铁"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "560880",
+      "name": "家电ETF广发",
+      "tags": ["消费", "家用电器"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "516110",
+      "name": "汽车ETF国泰",
+      "tags": ["制造", "汽车"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "159886",
+      "name": "机械ETF富国",
+      "tags": ["制造", "机械设备"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "159796",
+      "name": "电池ETF",
+      "tags": ["电力设备", "电池"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "515790",
+      "name": "光伏ETF",
+      "tags": ["电力设备", "光伏"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "159326",
+      "name": "电网设备ETF",
+      "tags": ["电力设备", "电网设备"],
+      "is_market_proxy": false,
+      "is_theme_proxy": true
+    },
+    {
+      "symbol": "159745",
+      "name": "建材ETF国泰",
+      "tags": ["周期", "建筑材料"],
       "is_market_proxy": false,
       "is_theme_proxy": true
     }
