@@ -7,6 +7,7 @@ import time
 
 import pandas as pd
 
+from .symbol_utils import infer_cn_exchange
 
 _LAST_DAILY_CALL_TS = 0.0
 
@@ -50,9 +51,7 @@ class TushareDataSource:
         raise RuntimeError('未找到 Tushare token（请设置 TUSHARE_TOKEN 或配置 backtest/config/local.env）')
 
     def _to_ts_code(self, symbol: str) -> str:
-        if symbol.startswith('6'):
-            return f'{symbol}.SH'
-        return f'{symbol}.SZ'
+        return f'{symbol}.{infer_cn_exchange(symbol)}'
 
     def get_data(self, symbol: str, start_date: str, end_date: str, use_cache: bool = True) -> pd.DataFrame:
         global _LAST_DAILY_CALL_TS

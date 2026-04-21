@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import pandas as pd
 
+from .symbol_utils import infer_cn_exchange
+
 
 class YFinanceDataSource:
     """基于 yfinance 的 A 股日线数据源。"""
 
     def _to_ticker(self, symbol: str) -> str:
-        if symbol.startswith('6'):
+        exchange = infer_cn_exchange(symbol)
+        if exchange == 'SH':
             return f'{symbol}.SS'
         return f'{symbol}.SZ'
 
