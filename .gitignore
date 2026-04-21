@@ -45,7 +45,6 @@ htmlcov/
 Thumbs.db
 
 # Local project data and generated files
-data/
 tmp/
 .worktrees/
 

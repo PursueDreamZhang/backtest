@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-04-08 11:12:03",
+  "input_file": "/Users/zhangchunfu/Nutstore Files/code/backtest/data/report/a_share_mcap_30_1000yi_2018_2019_from2020.json",
+  "data_source_priority": [
+    "tushare",
+    "sina",
+    "akshare",
+    "yfinance"
+  ],
+  "years": {
+    "2018": {
+      "total": 2758,
+      "ok": 0,
+      "skipped": 2502,
+      "filtered": 255,
+      "failed": 1,
+      "path": "/Users/zhangchunfu/Nutstore Files/code/backtest/data/yearly_stock_data/2018",
+      "date_range": {
+        "start": "20180101",
+        "end": "20181231"
+      }
+    },
+    "2019": {
+      "total": 2758,
+      "ok": 114,
+      "skipped": 2644,
+      "filtered": 0,
+      "failed": 0,
+      "path": "/Users/zhangchunfu/Nutstore Files/code/backtest/data/yearly_stock_data/2019",
+      "date_range": {
+        "start": "20190101",
+        "end": "20191231"
+      }
+    }
+  }
+}
