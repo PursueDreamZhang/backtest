@@ -75,15 +75,19 @@ def build_feature_table(
     return feature_table
 
 
-def build_leaderboard(feature_table: pd.DataFrame) -> pd.DataFrame:
+def build_leaderboard(feature_table: pd.DataFrame, params: dict[str, Any] | None = None) -> pd.DataFrame:
     work = feature_table.copy()
-    weights = {
-        'relative_strength_score': 0.30,
-        'momentum_score': 0.25,
-        'volume_price_score': 0.25,
-        'trend_support_score': 0.10,
-        'stability_score': 0.10,
-    }
+    weights = (
+        params.get('weights')
+        if params and params.get('weights')
+        else {
+            'relative_strength_score': 0.30,
+            'momentum_score': 0.25,
+            'volume_price_score': 0.25,
+            'trend_support_score': 0.10,
+            'stability_score': 0.10,
+        }
+    )
     for column in weights:
         work[column] = work.groupby('date')[column].rank(pct=True)
 
