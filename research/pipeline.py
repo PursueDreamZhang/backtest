@@ -7,6 +7,7 @@ from typing import Any
 from .data_loader import load_symbol_frames
 from .etf_universe import load_etf_universe
 from .market_regime import (
+    build_composite_benchmark,
     build_daily_state,
     build_feature_table,
     build_leaderboard,
@@ -32,21 +33,21 @@ def run_research(
     market_proxies = [item.symbol for item in universe if item.is_market_proxy]
     if not market_proxies:
         raise ValueError('ETF universe 中至少需要一个 is_market_proxy=true 的标的')
-    benchmark_symbol = market_proxies[0]
 
     frames = load_symbol_frames(symbols, start_date, end_date)
-    features = build_feature_table(frames, benchmark_symbol=benchmark_symbol, params=active_params)
+    benchmark_frame = build_composite_benchmark(frames, market_proxies)
+    features = build_feature_table(frames, benchmark_frame=benchmark_frame, params=active_params)
     leaderboard = build_leaderboard(features, params=active_params)
     daily_state = build_daily_state(
         frames,
         leaderboard,
-        benchmark_symbol=benchmark_symbol,
+        benchmark_frame=benchmark_frame,
         params=active_params,
     )
     summary = build_summary(
         daily_state,
         leaderboard,
-        frames[benchmark_symbol],
+        benchmark_frame,
         active_params['forward_windows'],
     )
 
