@@ -1,38 +1,45 @@
 {
   "etfs": [
     {
+      "symbol": "510210",
+      "name": "上证综指ETF（富国）",
+      "tags": ["市场代理", "宽基", "上证综指", "全市场"],
+      "is_market_proxy": true,
+      "is_theme_proxy": false
+    },
+    {
       "symbol": "510050",
       "name": "上证50ETF华夏",
       "tags": ["市场代理", "宽基", "上证50", "大盘蓝筹"],
-      "is_market_proxy": true,
+      "is_market_proxy": false,
       "is_theme_proxy": false
     },
     {
       "symbol": "159919",
       "name": "沪深300ETF嘉实",
       "tags": ["市场代理", "宽基", "沪深300", "核心龙头"],
-      "is_market_proxy": true,
+      "is_market_proxy": false,
       "is_theme_proxy": false
     },
     {
       "symbol": "510500",
       "name": "中证500ETF南方",
       "tags": ["市场代理", "宽基", "中证500", "中盘"],
-      "is_market_proxy": true,
+      "is_market_proxy": false,
       "is_theme_proxy": false
     },
     {
       "symbol": "159845",
       "name": "中证1000ETF华夏",
       "tags": ["市场代理", "宽基", "中证1000", "中小盘成长"],
-      "is_market_proxy": true,
+      "is_market_proxy": false,
       "is_theme_proxy": false
     },
     {
       "symbol": "563300",
       "name": "中证2000ETF华泰柏瑞",
       "tags": ["市场代理", "宽基", "中证2000", "微盘"],
-      "is_market_proxy": true,
+      "is_market_proxy": false,
       "is_theme_proxy": false
     },
     {
@@ -53,21 +60,21 @@
       "symbol": "159783",
       "name": "科创创业50ETF华夏",
       "tags": ["市场代理", "宽基", "科创创业50", "双创"],
-      "is_market_proxy": true,
+      "is_market_proxy": false,
       "is_theme_proxy": false
     },
     {
       "symbol": "159352",
       "name": "A500ETF南方",
       "tags": ["市场代理", "宽基", "中证A500", "核心宽基"],
-      "is_market_proxy": true,
+      "is_market_proxy": false,
       "is_theme_proxy": false
     },
     {
       "symbol": "560350",
       "name": "中证A50ETF摩根",
       "tags": ["市场代理", "宽基", "中证A50", "大盘龙头"],
-      "is_market_proxy": true,
+      "is_market_proxy": false,
       "is_theme_proxy": false
     },
     {

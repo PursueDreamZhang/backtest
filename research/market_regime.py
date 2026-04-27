@@ -5,6 +5,20 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .etf_universe import EtfUniverseEntry
+
+
+GENERIC_DIRECTION_TAGS = {
+    '市场代理',
+    '宽基',
+    '核心宽基',
+    '核心龙头',
+    '大盘蓝筹',
+    '大盘龙头',
+    '中盘',
+    '微盘',
+}
+
 
 def _pct_return(series: pd.Series, window: int) -> pd.Series:
     return series / series.shift(window) - 1.0
@@ -15,6 +29,42 @@ def _safe_nanmean(values: list[float]) -> float:
     if not filtered:
         return np.nan
     return float(np.mean(filtered))
+
+
+def _build_symbol_tag_map(universe: list[EtfUniverseEntry] | None) -> dict[str, tuple[str, ...]]:
+    if not universe:
+        return {}
+    return {item.symbol: item.tags for item in universe}
+
+
+def _resolve_leader_directions(
+    top: pd.DataFrame,
+    symbol_tag_map: dict[str, tuple[str, ...]],
+) -> tuple[str | None, str | None, str]:
+    if top.empty or not symbol_tag_map:
+        return None, None, ''
+
+    scores: dict[str, int] = {}
+    first_seen: dict[str, int] = {}
+    weights = [5, 4, 3, 2, 1]
+
+    for idx, row in enumerate(top.itertuples(index=False)):
+        tags = symbol_tag_map.get(str(row.symbol), ())
+        weight = weights[idx] if idx < len(weights) else 1
+        for tag in tags:
+            if tag in GENERIC_DIRECTION_TAGS:
+                continue
+            scores[tag] = scores.get(tag, 0) + weight
+            first_seen.setdefault(tag, idx)
+
+    if not scores:
+        return None, None, ''
+
+    ordered_tags = sorted(scores, key=lambda tag: (-scores[tag], first_seen[tag], tag))
+    top1 = ordered_tags[0]
+    top2 = ordered_tags[1] if len(ordered_tags) > 1 else None
+    summary = ' / '.join(ordered_tags[:3])
+    return top1, top2, summary
 
 
 def _classify_market_stage(
@@ -101,6 +151,21 @@ def build_feature_table(
 
         for date in work.index:
             row = {'date': date, 'symbol': symbol}
+            daily_return = work['close'].pct_change().loc[date]
+            open_to_close_return = (
+                work['close'].loc[date] / work['open'].loc[date] - 1.0
+                if pd.notna(work['open'].loc[date]) and work['open'].loc[date] != 0
+                else np.nan
+            )
+            high_to_close_gap = (
+                work['high'].loc[date] / work['close'].loc[date] - 1.0
+                if pd.notna(work['close'].loc[date]) and work['close'].loc[date] != 0
+                else np.nan
+            )
+            row['daily_return'] = daily_return
+            row['daily_return_pct'] = daily_return * 100 if pd.notna(daily_return) else np.nan
+            row['open_to_close_return'] = open_to_close_return
+            row['high_to_close_gap'] = high_to_close_gap
 
             rs_values = []
             for window, series in relative_returns.items():
@@ -150,7 +215,7 @@ def build_leaderboard(feature_table: pd.DataFrame, params: dict[str, Any] | None
 
     work['composite_score'] = sum(work[column] * weight for column, weight in weights.items())
     work['rank'] = work.groupby('date')['composite_score'].rank(method='first', ascending=False)
-    work['is_leader_candidate'] = work['rank'] <= 3
+    work['is_leader_candidate'] = work['rank'] <= 5
     return work
 
 
@@ -159,6 +224,7 @@ def build_daily_state(
     leaderboard: pd.DataFrame,
     benchmark_frame: pd.DataFrame,
     params: dict[str, Any],
+    universe: list[EtfUniverseEntry] | None = None,
 ) -> pd.DataFrame:
     del frames
 
@@ -168,10 +234,11 @@ def build_daily_state(
     benchmark['ret_10'] = benchmark['close'].pct_change(10)
     benchmark['ret_20'] = benchmark['close'].pct_change(20)
     benchmark['dd_10'] = benchmark['close'] / benchmark['close'].rolling(10).max() - 1.0
+    symbol_tag_map = _build_symbol_tag_map(universe)
 
     states = []
     for date, group in leaderboard.groupby('date'):
-        top = group.sort_values('rank').head(3).reset_index(drop=True)
+        top = group.sort_values('rank').head(5).reset_index(drop=True)
         breadth_close_above_short = float((group['trend_support_score_raw'] > 1.0).mean())
         volume_confirmation = float((group['volume_price_score_raw'] > 1.0).mean())
         trend_score = (
@@ -180,7 +247,11 @@ def build_daily_state(
         ) / 2.0
         cooldown_risk = float(abs(min(benchmark.loc[date, 'dd_10'], 0.0)))
         leader_gap = float(top.iloc[0]['composite_score'] - top.iloc[1]['composite_score']) if len(top) > 1 else 0.0
-        leader_stability = float(top['symbol'].nunique() <= 3)
+        leader_stability = float(top['symbol'].nunique() <= 5)
+        leader_direction_top1, leader_direction_top2, leader_direction_summary = _resolve_leader_directions(
+            top,
+            symbol_tag_map,
+        )
         market_stage_score = (
             trend_score * params['market_weights']['trend']
             + breadth_close_above_short * params['market_weights']['breadth']
@@ -208,6 +279,11 @@ def build_daily_state(
                 'leader_etf_top1': top.iloc[0]['symbol'],
                 'leader_etf_top2': top.iloc[1]['symbol'] if len(top) > 1 else None,
                 'leader_etf_top3': top.iloc[2]['symbol'] if len(top) > 2 else None,
+                'leader_etf_top4': top.iloc[3]['symbol'] if len(top) > 3 else None,
+                'leader_etf_top5': top.iloc[4]['symbol'] if len(top) > 4 else None,
+                'leader_direction_top1': leader_direction_top1,
+                'leader_direction_top2': leader_direction_top2,
+                'leader_direction_summary': leader_direction_summary,
                 'leader_strength_score': float(top.iloc[0]['composite_score']),
                 'leader_gap_score': leader_gap,
                 'leader_stability_score': leader_stability,

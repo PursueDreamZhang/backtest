@@ -1,0 +1,18 @@
+{
+  "direction": "机器人",
+  "thesis": "板块可能完成二次探底，观察是否重新转强",
+  "symbols": [
+    {
+      "symbol": "159770",
+      "name": "机器人ETF",
+      "type": "etf",
+      "role": "板块代理"
+    },
+    {
+      "symbol": "300124",
+      "name": "汇川技术",
+      "type": "stock",
+      "role": "中军"
+    }
+  ]
+}

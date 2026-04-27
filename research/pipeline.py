@@ -43,6 +43,7 @@ def run_research(
         leaderboard,
         benchmark_frame=benchmark_frame,
         params=active_params,
+        universe=universe,
     )
     summary = build_summary(
         daily_state,

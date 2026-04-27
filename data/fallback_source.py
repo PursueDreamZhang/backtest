@@ -114,7 +114,15 @@ class FallbackDataSource:
         end = f'{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}'
         return df.loc[start:end]
 
-    def get_data(self, symbol: str, start_date: str, end_date: str, use_cache: bool = True) -> pd.DataFrame:
+    def get_data(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        use_cache: bool = True,
+        *,
+        cache_only: bool = False,
+    ) -> pd.DataFrame:
         if not use_cache:
             return self._fetch_with_fallback(symbol, start_date, end_date)
 
@@ -132,6 +140,8 @@ class FallbackDataSource:
                 cached_df = None
 
         if cached_df is None or cached_df.empty:
+            if cache_only:
+                raise RuntimeError(f'cache-only 模式下未找到可用缓存: {symbol}')
             fresh = self._fetch_with_fallback(symbol, start_date, end_date)
             fresh = fresh[~fresh.index.duplicated(keep='last')].sort_index()
             fresh.to_pickle(cache_file)
@@ -141,6 +151,11 @@ class FallbackDataSource:
         merged = cached_df
         cache_start = merged.index.min()
         cache_end = merged.index.max()
+
+        if cache_only:
+            result = self._slice(merged, start_date, end_date)
+            print(f'cache-only 返回区间数据: {len(result)} 条')
+            return result
 
         # 向前补齐（请求更早的时间）
         if req_start < cache_start:

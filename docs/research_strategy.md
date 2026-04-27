@@ -132,7 +132,7 @@
 
 最终按 `composite_score` 从高到低排序，得到每日 ETF leaderboard。
 
-目前默认将前 3 名视为主线候选。
+目前默认将前 5 名视为主线候选。
 
 因此，这里的核心思想不是“绝对判断某个 ETF 是否强”，而是：
 
@@ -221,6 +221,8 @@
 - `leader_etf_top1`
 - `leader_etf_top2`
 - `leader_etf_top3`
+- `leader_etf_top4`
+- `leader_etf_top5`
 - `market_stage`
 - `can_open_new_position`
 

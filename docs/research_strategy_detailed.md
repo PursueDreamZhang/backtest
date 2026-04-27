@@ -442,7 +442,7 @@ python3 scripts/research_market_states.py \
 其中：
 
 - `rank=1` 表示当天最强主线候选
-- `is_leader_candidate=True` 表示进入前 3 名
+- `is_leader_candidate=True` 表示进入前 5 名
 
 ### 4. 策略含义
 
@@ -482,13 +482,15 @@ python3 scripts/research_market_states.py \
 
 其中 `dd_10` 表示近 10 日相对高点的回撤。
 
-### 2. 每天从 leaderboard 中抽取前 3 名
+### 2. 每天从 leaderboard 中抽取前 5 名
 
 对于每个日期，程序会取出当天 `rank` 最靠前的 3 个 ETF，作为：
 
 - `leader_etf_top1`
 - `leader_etf_top2`
 - `leader_etf_top3`
+- `leader_etf_top4`
+- `leader_etf_top5`
 
 ### 3. 计算 daily state 的核心分量
 
@@ -544,7 +546,7 @@ python3 scripts/research_market_states.py \
 
 - `top['symbol'].nunique() <= 3`
 
-由于当前只取前 3 名，这个写法区分度很弱，后续应该继续改进。
+由于当前只取前 5 名，这个写法区分度仍然有限，后续应该继续改进。
 
 ### 4. 计算市场阶段总分
 

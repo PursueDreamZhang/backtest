@@ -16,6 +16,7 @@ def load_symbol_frames(
     end_date: str,
     *,
     use_cache: bool = True,
+    cache_only: bool = False,
     cache_dir: str | None = None,
     priority: list[str] | None = None,
 ):
@@ -25,5 +26,11 @@ def load_symbol_frames(
     )
     frames = {}
     for symbol in symbols:
-        frames[symbol] = source.get_data(symbol, start_date, end_date, use_cache=use_cache)
+        frames[symbol] = source.get_data(
+            symbol,
+            start_date,
+            end_date,
+            use_cache=use_cache,
+            cache_only=cache_only,
+        )
     return frames
