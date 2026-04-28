@@ -7,7 +7,7 @@ from typing import Callable
 from data.realtime_quote_source import RealtimeQuoteSource
 from research.data_loader import load_symbol_frames
 
-from .config import load_watchlist_config
+from .config import WatchlistConfig, load_watchlist_config
 from .reporting import write_reports
 from .signals import evaluate_symbol
 
@@ -26,7 +26,67 @@ def run_watchlist_strategy(
     if mode not in {"intraday", "close_confirmed"}:
         raise ValueError("mode must be intraday or close_confirmed")
 
-    config = load_watchlist_config(config_path)
+    loaded_config = load_watchlist_config(config_path)
+    if isinstance(loaded_config, list):
+        return _run_many(
+            loaded_config,
+            output_dir=output_dir,
+            start_date=start_date,
+            end_date=end_date,
+            mode=mode,
+            frame_loader=frame_loader,
+            realtime_quote_loader=realtime_quote_loader,
+            cache_only=cache_only,
+        )
+    return _run_one(
+        loaded_config,
+        output_dir=output_dir,
+        start_date=start_date,
+        end_date=end_date,
+        mode=mode,
+        frame_loader=frame_loader,
+        realtime_quote_loader=realtime_quote_loader,
+        cache_only=cache_only,
+    )
+
+
+def _run_many(
+    configs: list[WatchlistConfig],
+    *,
+    output_dir: str,
+    start_date: str,
+    end_date: str,
+    mode: str,
+    frame_loader: Callable | None,
+    realtime_quote_loader: Callable | None,
+    cache_only: bool,
+) -> dict[str, dict[str, str]]:
+    return {
+        config.direction: _run_one(
+            config,
+            output_dir=f"{output_dir}/{config.direction}",
+            start_date=start_date,
+            end_date=end_date,
+            mode=mode,
+            frame_loader=frame_loader,
+            realtime_quote_loader=realtime_quote_loader,
+            cache_only=cache_only,
+        )
+        for config in configs
+    }
+
+
+def _run_one(
+    config: WatchlistConfig,
+    *,
+    output_dir: str,
+    start_date: str,
+    end_date: str,
+    mode: str,
+    frame_loader: Callable | None,
+    realtime_quote_loader: Callable | None,
+    cache_only: bool,
+) -> dict[str, str]:
     symbols = [item.symbol for item in config.symbols]
 
     active_frame_loader = frame_loader or load_symbol_frames

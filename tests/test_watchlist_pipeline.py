@@ -122,6 +122,49 @@ class WatchlistPipelineTests(unittest.TestCase):
 
             self.assertEqual(captured["kwargs"], {"cache_only": True})
 
+    def test_should_run_multiple_watchlists_into_direction_subdirectories(self):
+        closes = [10.0] * 80
+        frame = pd.DataFrame(
+            {
+                "open": closes,
+                "high": [10.2] * 80,
+                "low": [9.8] * 80,
+                "close": closes,
+                "volume": [1000] * 80,
+            },
+            index=pd.date_range("2026-01-01", periods=80),
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "watchlists.json"
+            config_path.write_text(
+                """
+                {
+                  "watchlists": [
+                    {"direction":"半导体","symbols":[{"symbol":"688012","type":"stock"}]},
+                    {"direction":"商业航天","symbols":[{"symbol":"001270","type":"stock"}]}
+                  ]
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            result = run_watchlist_strategy(
+                config_path=str(config_path),
+                output_dir=tmp,
+                start_date="20260101",
+                end_date="20260427",
+                mode="close_confirmed",
+                frame_loader=lambda symbols, start_date, end_date: {
+                    "688012": frame,
+                    "001270": frame,
+                },
+                realtime_quote_loader=None,
+            )
+
+            self.assertTrue(Path(result["半导体"]["json"]).exists())
+            self.assertTrue(Path(result["商业航天"]["json"]).exists())
+
 
 if __name__ == "__main__":
     unittest.main()
