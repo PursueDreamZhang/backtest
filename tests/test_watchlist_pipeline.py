@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from watchlist.pipeline import run_watchlist_strategy
-from watchlist.reporting import write_reports
+from watchlist.reporting import write_overview_reports, write_reports
 from watchlist.signals import SignalResult
 
 
@@ -47,6 +47,95 @@ class WatchlistReportingTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["intraday_triggered"], 1)
             self.assertTrue(Path(paths["csv"]).exists())
             self.assertTrue(Path(paths["markdown"]).exists())
+
+    def test_should_write_merged_overview_reports(self):
+        triggered = SignalResult(
+            symbol="002115",
+            name="三维通信",
+            instrument_type="stock",
+            mode="close_confirmed",
+            group="触发买点",
+            signal_timing="close_confirmed",
+            confidence="confirmed",
+            score=80,
+            setup="整理后第一根启动阳线",
+            latest_price=14.0,
+            support=13.2,
+            stop_loss=12.4,
+            risk_to_stop_pct=12.9,
+            signals=("放量突破近20日高点",),
+            action="轻仓试错，等待确认延续",
+            invalid_if="跌回平台",
+        )
+        duplicated_lower_priority = SignalResult(
+            symbol="002115",
+            name="三维通信",
+            instrument_type="stock",
+            mode="close_confirmed",
+            group="重点观察",
+            signal_timing="close_confirmed",
+            confidence="confirmed",
+            score=72,
+            setup="MA20 第一次回档",
+            latest_price=14.0,
+            support=13.2,
+            stop_loss=12.4,
+            risk_to_stop_pct=12.9,
+            signals=("回踩 MA20",),
+            action="等待右侧确认",
+            invalid_if="跌破 MA20",
+        )
+        focus = SignalResult(
+            symbol="600343",
+            name="航天动力",
+            instrument_type="stock",
+            mode="close_confirmed",
+            group="重点观察",
+            signal_timing="close_confirmed",
+            confidence="confirmed",
+            score=74,
+            setup="MA40 弹簧压紧",
+            latest_price=32.84,
+            support=33.1,
+            stop_loss=31.1,
+            risk_to_stop_pct=5.5,
+            signals=("价格进入 MA40 附近",),
+            action="等待重新站上 MA5 或放量转强",
+            invalid_if="跌破 31.1",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = write_overview_reports(
+                output_dir=tmp,
+                reports=[
+                    {
+                        "direction": "商业航天",
+                        "summary": {"triggered": 1, "focus": 1, "wait": 0, "excluded": 0, "insufficient_data": 0},
+                        "items": [triggered, focus],
+                    },
+                    {
+                        "direction": "通信",
+                        "summary": {"triggered": 0, "focus": 1, "wait": 0, "excluded": 0, "insufficient_data": 0},
+                        "items": [duplicated_lower_priority],
+                    },
+                ],
+                mode="close_confirmed",
+                run_date="2026-04-28",
+            )
+
+            payload = json.loads(Path(paths["json"]).read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["triggered"], 1)
+            self.assertEqual(payload["summary"]["focus"], 1)
+            self.assertEqual(payload["items"][0]["symbol"], "002115")
+            self.assertEqual(payload["items"][0]["directions"], ["商业航天", "通信"])
+            self.assertEqual(payload["items"][0]["group"], "触发买点")
+            self.assertEqual(payload["items"][1]["symbol"], "600343")
+            self.assertIn("今日优先级清单", Path(paths["markdown"]).read_text(encoding="utf-8"))
+            self.assertTrue(Path(paths["csv"]).exists())
+            html = Path(paths["html"]).read_text(encoding="utf-8")
+            self.assertIn("观察标的总览", html)
+            self.assertIn("今日优先级清单", html)
+            self.assertIn("题材热度排行", html)
 
 
 class WatchlistPipelineTests(unittest.TestCase):
@@ -164,6 +253,10 @@ class WatchlistPipelineTests(unittest.TestCase):
 
             self.assertTrue(Path(result["半导体"]["json"]).exists())
             self.assertTrue(Path(result["商业航天"]["json"]).exists())
+            self.assertTrue(Path(result["overview"]["json"]).exists())
+            self.assertTrue(Path(result["overview"]["csv"]).exists())
+            self.assertTrue(Path(result["overview"]["markdown"]).exists())
+            self.assertTrue(Path(result["overview"]["html"]).exists())
 
 
 if __name__ == "__main__":

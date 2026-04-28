@@ -8,7 +8,7 @@ from data.realtime_quote_source import RealtimeQuoteSource
 from research.data_loader import load_symbol_frames
 
 from .config import WatchlistConfig, load_watchlist_config
-from .reporting import write_reports
+from .reporting import _summary, write_overview_reports, write_reports
 from .signals import evaluate_symbol
 
 
@@ -61,10 +61,11 @@ def _run_many(
     realtime_quote_loader: Callable | None,
     cache_only: bool,
 ) -> dict[str, dict[str, str]]:
-    return {
-        config.direction: _run_one(
+    paths = {}
+    overview_reports = []
+    for config in configs:
+        run_result = _evaluate_one(
             config,
-            output_dir=f"{output_dir}/{config.direction}",
             start_date=start_date,
             end_date=end_date,
             mode=mode,
@@ -72,8 +73,30 @@ def _run_many(
             realtime_quote_loader=realtime_quote_loader,
             cache_only=cache_only,
         )
-        for config in configs
-    }
+        paths[config.direction] = write_reports(
+            output_dir=f"{output_dir}/{config.direction}",
+            direction=config.direction,
+            thesis=config.thesis,
+            mode=mode,
+            results=run_result["results"],
+            run_date=run_result["run_date"],
+        )
+        overview_reports.append(
+            {
+                "direction": config.direction,
+                "summary": run_result["summary"],
+                "items": run_result["results"],
+            }
+        )
+
+    run_date = datetime.strptime(end_date, "%Y%m%d").date().isoformat()
+    paths["overview"] = write_overview_reports(
+        output_dir=output_dir,
+        reports=overview_reports,
+        mode=mode,
+        run_date=run_date,
+    )
+    return paths
 
 
 def _run_one(
@@ -87,6 +110,35 @@ def _run_one(
     realtime_quote_loader: Callable | None,
     cache_only: bool,
 ) -> dict[str, str]:
+    run_result = _evaluate_one(
+        config,
+        start_date=start_date,
+        end_date=end_date,
+        mode=mode,
+        frame_loader=frame_loader,
+        realtime_quote_loader=realtime_quote_loader,
+        cache_only=cache_only,
+    )
+    return write_reports(
+        output_dir=output_dir,
+        direction=config.direction,
+        thesis=config.thesis,
+        mode=mode,
+        results=run_result["results"],
+        run_date=run_result["run_date"],
+    )
+
+
+def _evaluate_one(
+    config: WatchlistConfig,
+    *,
+    start_date: str,
+    end_date: str,
+    mode: str,
+    frame_loader: Callable | None,
+    realtime_quote_loader: Callable | None,
+    cache_only: bool,
+) -> dict:
     symbols = [item.symbol for item in config.symbols]
 
     active_frame_loader = frame_loader or load_symbol_frames
@@ -115,14 +167,11 @@ def _run_one(
         )
 
     run_date = datetime.strptime(end_date, "%Y%m%d").date().isoformat()
-    return write_reports(
-        output_dir=output_dir,
-        direction=config.direction,
-        thesis=config.thesis,
-        mode=mode,
-        results=results,
-        run_date=run_date,
-    )
+    return {
+        "results": results,
+        "summary": _summary(results, mode),
+        "run_date": run_date,
+    }
 
 
 def _accepts_keyword(func: Callable, keyword: str) -> bool:
