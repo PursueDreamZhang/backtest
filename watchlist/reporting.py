@@ -258,6 +258,12 @@ def _summary_label(key: str) -> str:
     return labels.get(key, key)
 
 
+def _trigger_groups(mode: str) -> set[str]:
+    if mode == "intraday":
+        return {"盘中触发"}
+    return {"触发买点"}
+
+
 def _render_priority_rows(items: list[dict[str, Any]], *, include_all: bool) -> str:
     rows = []
     hidden_groups = {"等待回调", "盘中等待", "排除观察", "盘中失效", "数据不足"}
@@ -282,16 +288,64 @@ def _render_priority_rows(items: list[dict[str, Any]], *, include_all: bool) -> 
     return "\n".join(rows)
 
 
-def _render_theme_rows(theme_rows: list[dict[str, Any]]) -> str:
+def _render_theme_stock_rows(direction: str, themed_items: list[dict[str, Any]]) -> str:
     rows = []
+    for item in themed_items:
+        rows.append(
+            "<tr>"
+            f"<td class=\"mono\">{escape(item['symbol'])}</td>"
+            f"<td class=\"name\">{escape(item['name'])}</td>"
+            f"<td><span class=\"{_group_class(item['group'])}\">{escape(item['group'])}</span></td>"
+            f"<td class=\"num\">{item['score']}</td>"
+            f"<td>{escape(item['setup'])}</td>"
+            f"<td class=\"num\">{_fmt_number(item['latest_price'])}</td>"
+            f"<td>{escape(item['action'])}</td>"
+            "</tr>"
+        )
+    if not rows:
+        rows.append(
+            "<tr><td colspan=\"7\" class=\"empty\">当前没有处于触发状态的标的</td></tr>"
+        )
+    detail_id = f"theme-detail-{direction}"
+    return (
+        f"<tr class=\"theme-detail\" id=\"{escape(detail_id)}\" hidden>"
+        "<td colspan=\"6\">"
+        "<div class=\"detail-card\">"
+        f"<div class=\"detail-title\">{escape(direction)} 触发标的</div>"
+        "<div class=\"detail-table-wrap\">"
+        "<table class=\"detail-table\">"
+        "<thead><tr><th>代码</th><th>名称</th><th>状态</th><th>评分</th><th>形态</th><th>价格</th><th>动作</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody>"
+        "</table>"
+        "</div>"
+        "</div>"
+        "</td>"
+        "</tr>"
+    )
+
+
+def _render_theme_rows(theme_rows: list[dict[str, Any]], items: list[dict[str, Any]], *, mode: str) -> str:
+    rows = []
+    trigger_groups = _trigger_groups(mode)
     for row in theme_rows:
         triggered = row.get("triggered", row.get("intraday_triggered", 0))
         focus = row.get("focus", row.get("intraday_alert", 0))
         wait = row.get("wait", row.get("intraday_wait", 0))
         excluded = row.get("excluded", row.get("intraday_invalid", 0))
+        direction = row["direction"]
+        detail_id = f"theme-detail-{direction}"
+        themed_items = [
+            item
+            for item in items
+            if direction in item["directions"] and item["group"] in trigger_groups
+        ]
+        toggle_button = (
+            f"<button class=\"toggle-btn\" type=\"button\" aria-expanded=\"false\" "
+            f"data-target=\"{escape(detail_id)}\">展开</button>"
+        )
         rows.append(
             "<tr>"
-            f"<td class=\"name\">{escape(row['direction'])}</td>"
+            f"<td class=\"theme-cell\"><span class=\"name\">{escape(direction)}</span>{toggle_button}</td>"
             f"<td class=\"num hot\">{triggered}</td>"
             f"<td class=\"num warm\">{focus}</td>"
             f"<td class=\"num\">{wait}</td>"
@@ -299,6 +353,7 @@ def _render_theme_rows(theme_rows: list[dict[str, Any]]) -> str:
             f"<td class=\"num muted\">{row.get('insufficient_data', 0)}</td>"
             "</tr>"
         )
+        rows.append(_render_theme_stock_rows(direction, themed_items))
     return "\n".join(rows)
 
 
@@ -317,7 +372,7 @@ def _write_overview_html(
     )
     priority_rows = _render_priority_rows(items, include_all=False)
     all_rows = _render_priority_rows(items, include_all=True)
-    theme_html = _render_theme_rows(theme_rows)
+    theme_html = _render_theme_rows(theme_rows, items, mode=mode)
     html = f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -425,11 +480,55 @@ def _write_overview_html(
     .warm {{ color: var(--focus); font-weight: 800; }}
     .muted {{ color: var(--muted); }}
     .empty {{ text-align: center; color: var(--muted); padding: 28px; }}
+    .theme-cell {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }}
+    .toggle-btn {{
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--accent);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }}
+    .toggle-btn:hover {{ background: #eef4ff; }}
+    .theme-detail td {{
+      background: #fbfcfe;
+      padding: 0;
+    }}
+    .detail-card {{
+      padding: 14px 16px 16px;
+      border-top: 1px dashed var(--line);
+    }}
+    .detail-title {{
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }}
+    .detail-table-wrap {{ overflow: auto; }}
+    .detail-table {{
+      min-width: 760px;
+      border-collapse: separate;
+      border-spacing: 0;
+    }}
+    .detail-table th {{
+      position: static;
+      background: #f4f6fa;
+    }}
+    .detail-table tr:hover td {{ background: #f4f8ff; }}
     @media (max-width: 760px) {{
       header, main {{ padding-left: 14px; padding-right: 14px; }}
       h1 {{ font-size: 22px; }}
       .section-header {{ align-items: flex-start; flex-direction: column; }}
       table {{ min-width: 840px; }}
+      .theme-cell {{ align-items: flex-start; flex-direction: column; }}
     }}
   </style>
 </head>
@@ -477,6 +576,23 @@ def _write_overview_html(
       </div>
     </section>
   </main>
+  <script>
+    document.querySelectorAll('.toggle-btn').forEach((button) => {{
+      button.addEventListener('click', () => {{
+        const detail = document.getElementById(button.dataset.target);
+        if (!detail) return;
+        const nextState = detail.hasAttribute('hidden');
+        if (nextState) {{
+          detail.removeAttribute('hidden');
+          button.textContent = '收起';
+        }} else {{
+          detail.setAttribute('hidden', '');
+          button.textContent = '展开';
+        }}
+        button.setAttribute('aria-expanded', nextState ? 'true' : 'false');
+      }});
+    }});
+  </script>
 </body>
 </html>
 """

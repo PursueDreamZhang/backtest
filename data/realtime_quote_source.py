@@ -125,10 +125,47 @@ class SinaRealtimeQuoteSource:
         return self._parse_response(normalized_symbol, response.text)
 
     def get_quotes(self, symbols: Iterable[str]) -> dict[str, dict]:
-        return {
-            normalize_cn_symbol(symbol): self.get_quote(normalize_cn_symbol(symbol))
-            for symbol in symbols
-        }
+        normalized_symbols = [normalize_cn_symbol(symbol) for symbol in symbols]
+        unique_symbols = list(dict.fromkeys(normalized_symbols))
+        if not unique_symbols:
+            return {}
+
+        sina_symbols = ",".join(self._to_sina_symbol(symbol) for symbol in unique_symbols)
+        url = f'https://hq.sinajs.cn/list={sina_symbols}'
+        session = requests.Session()
+        session.trust_env = False
+        response = session.get(
+            url,
+            timeout=10,
+            headers={'Referer': 'https://finance.sina.com.cn'},
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f'新浪实时接口返回 {response.status_code}')
+        response.encoding = 'gbk'
+
+        quotes: dict[str, dict] = {}
+        payload_by_symbol = self._split_batch_payload(response.text)
+        for symbol in unique_symbols:
+            payload = payload_by_symbol.get(symbol)
+            if payload is None:
+                continue
+            quotes[symbol] = self._parse_response(symbol, payload)
+        return quotes
+
+    def _split_batch_payload(self, payload: str) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for raw_line in payload.splitlines():
+            line = raw_line.strip()
+            if not line or '="' not in line:
+                continue
+            prefix = 'var hq_str_'
+            if not line.startswith(prefix):
+                continue
+            symbol_token = line[len(prefix) :].split('=', 1)[0].strip()
+            if not symbol_token:
+                continue
+            result[normalize_cn_symbol(symbol_token)] = line
+        return result
 
     def _parse_response(self, symbol: str, payload: str) -> dict:
         if '="' not in payload:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from typing import Any
 
@@ -30,6 +30,18 @@ class SignalResult:
     needs_close_confirmation: tuple[str, ...] = ()
 
 
+TRIGGER_GROUPS = {"盘中触发", "触发买点"}
+FOCUS_GROUPS = {"盘中预警", "重点观察"}
+WAIT_GROUPS = {"盘中等待", "等待回调"}
+TRIGGER_TO_FOCUS = {"盘中触发": "盘中预警", "触发买点": "重点观察"}
+TRIGGER_OR_FOCUS_TO_WAIT = {
+    "盘中触发": "盘中等待",
+    "触发买点": "等待回调",
+    "盘中预警": "盘中等待",
+    "重点观察": "等待回调",
+}
+
+
 def _finite(value: Any) -> bool:
     return value is not None and pd.notna(value) and math.isfinite(float(value))
 
@@ -54,6 +66,89 @@ def _stop_loss_for(instrument_type: str, support: float | None) -> float | None:
     return support * 0.94
 
 
+def _avg_volume(frame: pd.DataFrame, start: int, end: int) -> float | None:
+    window = frame.iloc[start:end]
+    if window.empty:
+        return None
+    value = window["volume"].mean()
+    if not _finite(value):
+        return None
+    return float(value)
+
+
+def _is_local_trough(frame: pd.DataFrame, index: int, span: int = 2) -> bool:
+    start = max(0, index - span)
+    end = min(len(frame), index + span + 1)
+    center = float(frame.iloc[index]["low"])
+    window = frame.iloc[start:end]["low"]
+    return center == float(window.min())
+
+
+def _double_bottom_candidate(frame: pd.DataFrame) -> dict[str, float | int] | None:
+    last60 = frame.tail(60).reset_index(drop=True)
+    if len(last60) < 40:
+        return None
+
+    best: dict[str, float | int] | None = None
+    last_index = len(last60) - 1
+    trough_indices = [index for index in range(5, len(last60) - 1) if _is_local_trough(last60, index)]
+    for trough_pos in range(len(trough_indices) - 1):
+        first_idx = trough_indices[trough_pos]
+        second_idx = trough_indices[trough_pos + 1]
+        if second_idx - first_idx < 10:
+            continue
+        first_low = float(last60.iloc[first_idx]["low"])
+        second_low = float(last60.iloc[second_idx]["low"])
+        relative_diff = second_low / first_low - 1.0
+        if relative_diff < -0.01 or relative_diff > 0.03:
+            continue
+
+        # A valid double bottom must use the latest consecutive effective
+        # troughs. Once a lower low appears, the earlier left bottom is invalid.
+        intervening = last60.iloc[first_idx + 1 : second_idx]
+        if not intervening.empty:
+            intervening_low = float(intervening["low"].min())
+            if intervening_low < first_low:
+                continue
+
+        middle_high = float(last60.iloc[first_idx + 1 : second_idx]["high"].max())
+        rebound = middle_high / max(first_low, second_low) - 1.0
+        if rebound < 0.06:
+            continue
+
+        if second_idx < len(last60) - 15:
+            continue
+
+        first_leg_volume = _avg_volume(last60, max(0, first_idx - 5), first_idx + 1)
+        second_leg_volume = _avg_volume(last60, max(0, second_idx - 5), second_idx + 1)
+        if (
+            first_leg_volume is not None
+            and second_leg_volume is not None
+            and second_leg_volume > first_leg_volume * 0.85
+        ):
+            continue
+
+        recent_high = float(last60.iloc[second_idx + 1 : last_index]["high"].max()) if second_idx + 1 < last_index else None
+        candidate = {
+            "first_idx": first_idx,
+            "second_idx": second_idx,
+            "first_low": first_low,
+            "second_low": second_low,
+            "relative_diff": relative_diff,
+            "rebound": rebound,
+            "recent_high": recent_high,
+        }
+        if best is None:
+            best = candidate
+            continue
+        if (candidate["second_idx"], -abs(candidate["relative_diff"])) > (
+            best["second_idx"],
+            -abs(best["relative_diff"]),
+        ):
+            best = candidate
+    return best
+
+
 def _result(
     *,
     symbol: str,
@@ -73,7 +168,7 @@ def _result(
 ) -> SignalResult:
     confidence = "provisional" if mode == "intraday" else "confirmed"
     signal_timing = "intraday" if mode == "intraday" else "close_confirmed"
-    return SignalResult(
+    result = SignalResult(
         symbol=symbol,
         name=name,
         instrument_type=instrument_type,
@@ -92,6 +187,43 @@ def _result(
         invalid_if=invalid_if,
         needs_close_confirmation=needs_close_confirmation,
     )
+    return _apply_risk_guardrail(result)
+
+
+def _apply_risk_guardrail(result: SignalResult) -> SignalResult:
+    risk = result.risk_to_stop_pct
+    if risk is None:
+        return result
+
+    risk_signal = f"当前价距离止损位 {risk:.2f}%"
+    if risk > 18.0 and result.group in TRIGGER_OR_FOCUS_TO_WAIT:
+        return replace(
+            result,
+            group=TRIGGER_OR_FOCUS_TO_WAIT[result.group],
+            score=min(result.score, 58),
+            signals=result.signals + (f"{risk_signal}，赔率不合适",),
+            action="离止损过远，等待回到 MA20、MA40 或前低支撑附近再评估",
+            needs_close_confirmation=(),
+        )
+
+    if risk > 12.0:
+        if result.group in TRIGGER_TO_FOCUS:
+            return replace(
+                result,
+                group=TRIGGER_TO_FOCUS[result.group],
+                score=min(result.score, 74),
+                signals=result.signals + (f"{risk_signal}，已经偏离理想试错区",),
+                action="结构成立，但离止损偏远，等更贴近支撑或下一次右侧确认",
+            )
+        if result.group in FOCUS_GROUPS:
+            return replace(
+                result,
+                score=min(result.score, 74),
+                signals=result.signals + (f"{risk_signal}，已经偏离理想试错区",),
+                action="离止损偏远，优先等更贴近支撑的位置",
+            )
+
+    return result
 
 
 def _latest_values(frame: pd.DataFrame, mode: str, realtime_quote: dict | None) -> dict[str, float | None]:
@@ -137,6 +269,7 @@ def evaluate_symbol(
     frame: pd.DataFrame,
     mode: str,
     realtime_quote: dict | None = None,
+    expected_end_date: str | None = None,
 ) -> SignalResult:
     if frame is None or len(frame) < 60:
         return _result(
@@ -154,6 +287,28 @@ def evaluate_symbol(
             action="跳过正式筛选",
             invalid_if="补齐历史数据后重新评估",
         )
+
+    if mode == "close_confirmed" and expected_end_date is not None:
+        expected_ts = pd.Timestamp(
+            f"{expected_end_date[:4]}-{expected_end_date[4:6]}-{expected_end_date[6:]}"
+        )
+        latest_ts = pd.Timestamp(frame.index[-1]).normalize()
+        if latest_ts < expected_ts:
+            return _result(
+                symbol=symbol,
+                name=name,
+                instrument_type=instrument_type,
+                mode=mode,
+                group="数据不足",
+                score=0,
+                setup="缺少当日收盘数据",
+                latest_price=0.0,
+                support=None,
+                stop_loss=None,
+                signals=(f"最新日线停留在 {latest_ts.date().isoformat()}",),
+                action="等待补齐当日收盘数据后再评估",
+                invalid_if=f"补齐 {expected_ts.date().isoformat()} 收盘数据后重新评估",
+            )
 
     enriched = enrich_daily_indicators(frame)
     values = _latest_values(enriched, mode, realtime_quote)
@@ -186,6 +341,13 @@ def evaluate_symbol(
     support = float(ma40) if _finite(ma40) else None
     stop_loss = _stop_loss_for(instrument_type, support)
     signals: list[str] = []
+    prior_high = float(enriched.iloc[-2]["high"]) if len(enriched) >= 2 else None
+    prior5_high = float(enriched.iloc[-6:-1]["high"].max()) if len(enriched) >= 6 else prior_high
+    recent3 = enriched.tail(3)
+    recent5 = enriched.tail(5)
+    recent10 = enriched.tail(10)
+    recent20 = enriched.tail(20)
+    recent40 = enriched.tail(40)
 
     if stop_loss is not None and price < stop_loss:
         group = "盘中失效" if mode == "intraday" else "排除观察"
@@ -206,22 +368,65 @@ def evaluate_symbol(
             needs_close_confirmation=("收盘是否收回支撑位",) if mode == "intraday" else (),
         )
 
-    ma40_near = support is not None and support * 0.98 <= price <= support * 1.03
+    recent_swing_low = float(recent10["low"].min()) if not recent10.empty else None
+    if support is not None and recent_swing_low is not None and recent_swing_low >= support * 0.97:
+        support = max(support, recent_swing_low)
+        stop_loss = _stop_loss_for(instrument_type, support)
+
+    ret40 = enriched.iloc[-1].get("ret40")
+    ma40_trend_up = _finite(ma40) and len(enriched) >= 6 and _finite(enriched.iloc[-6].get("ma40")) and float(ma40) >= float(enriched.iloc[-6].get("ma40"))
+    above_ma40_ratio = 0.0
+    recent40_valid = recent40.dropna(subset=["ma40"])
+    if len(recent40_valid) >= 20:
+        above_ma40_ratio = float((recent40_valid["close"] >= recent40_valid["ma40"]).mean())
+    trend_selected = _finite(ret40) and float(ret40) > 0 and ma40_trend_up and above_ma40_ratio >= 0.70
+
+    ma40_recent_low = float(recent3["low"].min()) if not recent3.empty else None
+    ma40_edge = (
+        support is not None
+        and _finite(ma40)
+        and ma40_recent_low is not None
+        and ma40_recent_low <= float(ma40) * 1.01
+        and ma40_recent_low >= float(ma40) * 0.97
+        and price >= float(ma40) * 0.99
+        and price <= float(ma40) * 1.04
+    )
     drawdown20 = enriched.iloc[-1].get("drawdown20")
     had_pullback = _finite(drawdown20) and float(drawdown20) <= -0.05
-    shrink_volume = _finite(volume) and _finite(vol20) and float(volume) <= float(vol20) * 0.9
-    turn_up = False
-    if _finite(ma5) and price > float(ma5):
-        turn_up = True
-    if _finite(previous_close) and price > float(previous_close):
-        turn_up = True
+    vol5 = enriched.iloc[-1].get("vol5")
+    shrink_volume = _finite(vol5) and _finite(vol20) and float(vol5) <= float(vol20) * 0.9
+    range5 = ((recent5["high"] - recent5["low"]) / recent5["close"]).mean() if not recent5.empty else None
+    range20 = ((recent20["high"] - recent20["low"]) / recent20["close"]).mean() if not recent20.empty else None
+    volatility_compressed = _finite(range5) and _finite(range20) and float(range5) <= float(range20) * 0.9
+    no_heavy_break = True
+    if _finite(vol20) and not recent10.empty and recent10["ma40"].notna().all():
+        daily_drop = recent10["close"].pct_change()
+        heavy_break = (
+            ((recent10["close"] < recent10["ma40"] * 0.97) & (recent10["volume"] >= float(vol20) * 1.3))
+            | ((daily_drop <= -0.03) & (recent10["volume"] >= float(vol20) * 1.3))
+        ).any()
+        no_heavy_break = not bool(heavy_break)
+    day_return = _pct_change(price, previous_close)
+    turn_up = (
+        _finite(ma5)
+        and price > float(ma5)
+        and day_return is not None
+        and day_return > 0.05
+        and (
+            (_finite(prior_high) and price > float(prior_high))
+            or (_finite(prior5_high) and price > float(prior5_high))
+        )
+    )
 
-    if ma40_near and had_pullback and shrink_volume:
+    if trend_selected and ma40_edge and had_pullback and shrink_volume and volatility_compressed and no_heavy_break:
         signals.extend(
             [
-                "价格进入 MA40 附近",
+                "近40日涨幅为正且 MA40 维持上行",
+                "过去40日大部分收盘价位于 MA40 上方",
+                "最近3日回踩到 MA40 / 前低支撑边缘",
                 "近20日经历过至少5%回撤",
-                "成交量低于近20日均量",
+                "近5日均量低于近20日均量",
+                "近5日波动率低于近20日平均波动率",
             ]
         )
         if turn_up:
@@ -237,10 +442,10 @@ def evaluate_symbol(
                 latest_price=price,
                 support=support,
                 stop_loss=stop_loss,
-                signals=signals + ["价格重新转强"],
+                signals=signals + ["价格重新站上 MA5", "突破前一日高点或近5日小平台", "当日涨幅超过5%"],
                 action="优先盯盘；高开过多不追",
                 invalid_if=f"跌破 {stop_loss:.3f}" if stop_loss is not None else "跌破关键支撑",
-                needs_close_confirmation=("收盘是否站上 MA5", "全天成交量是否满足条件") if mode == "intraday" else (),
+                needs_close_confirmation=("收盘是否站上 MA5", "收盘是否突破右侧小平台", "全天成交量是否满足条件") if mode == "intraday" else (),
             )
         group = "盘中预警" if mode == "intraday" else "重点观察"
         return _result(
@@ -255,7 +460,7 @@ def evaluate_symbol(
             support=support,
             stop_loss=stop_loss,
             signals=signals,
-            action="等待重新站上 MA5 或放量转强",
+            action="等待站上 MA5 并突破右侧小平台",
             invalid_if=f"跌破 {stop_loss:.3f}" if stop_loss is not None else "跌破关键支撑",
         )
 
@@ -283,16 +488,36 @@ def evaluate_symbol(
             )
 
     # Launch candle after range compression.
-    prior20 = enriched.iloc[-21:-1] if len(enriched) >= 21 else pd.DataFrame()
-    if not prior20.empty:
-        range_compressed = (prior20["high"].max() / prior20["low"].min() - 1.0) <= 0.15
+    prior10 = enriched.iloc[-11:-1] if len(enriched) >= 11 else pd.DataFrame()
+    if not prior10.empty:
+        range_compressed = (prior10["high"].max() / prior10["low"].min() - 1.0) <= 0.15
         day_return = _pct_change(price, previous_close)
         volume_expand = _finite(volume) and _finite(enriched.iloc[-1].get("vol5")) and float(volume) >= float(enriched.iloc[-1].get("vol5")) * 1.5
-        prior_high20 = float(prior20["high"].max())
-        price_breakout = price > prior_high20
-        if range_compressed and day_return is not None and day_return >= 0.05 and volume_expand and price_breakout:
+        prior_high10 = float(prior10["high"].max())
+        price_breakout = price > prior_high10
+        previous_launch_day = False
+        if len(enriched) >= 12:
+            prev_window = enriched.iloc[-12:-2]
+            prev_close = enriched.iloc[-2].get("close")
+            prev_previous_close = enriched.iloc[-3].get("close") if len(enriched) >= 3 else None
+            prev_volume = enriched.iloc[-2].get("volume")
+            prev_vol5 = enriched.iloc[-2].get("vol5")
+            if not prev_window.empty:
+                prev_range_compressed = (prev_window["high"].max() / prev_window["low"].min() - 1.0) <= 0.15
+                prev_day_return = _pct_change(prev_close, prev_previous_close)
+                prev_volume_expand = _finite(prev_volume) and _finite(prev_vol5) and float(prev_volume) >= float(prev_vol5) * 1.5
+                prev_price_breakout = _finite(prev_close) and float(prev_close) > float(prev_window["high"].max())
+                previous_launch_day = (
+                    prev_range_compressed
+                    and prev_day_return is not None
+                    and prev_day_return >= 0.05
+                    and prev_volume_expand
+                    and prev_price_breakout
+                )
+        first_breakout_day = not previous_launch_day
+        if range_compressed and day_return is not None and day_return >= 0.05 and volume_expand and price_breakout and first_breakout_day:
             group = "盘中触发" if mode == "intraday" else "触发买点"
-            support = float(prior20["low"].min())
+            support = float(prior10["low"].min())
             stop_loss = support
             return _result(
                 symbol=symbol,
@@ -305,30 +530,38 @@ def evaluate_symbol(
                 latest_price=price,
                 support=support,
                 stop_loss=stop_loss,
-                signals=["近20日振幅收敛", "涨幅超过5%", "放量突破近20日高点"],
+                signals=["近10日振幅收敛", "涨幅超过5%", "放量突破近10日高点"],
                 action="轻仓试错，等待确认延续",
                 invalid_if="启动阳线实体被吞没或跌回平台",
                 needs_close_confirmation=("收盘是否突破平台", "全天成交量是否放大") if mode == "intraday" else (),
             )
 
     # Double-bottom / second compression.
-    last60 = enriched.tail(60)
-    if len(last60) >= 40:
-        first_half = last60.iloc[:30]
-        second_half = last60.iloc[30:]
-        first_low = float(first_half["low"].min())
-        second_low = float(second_half["low"].min())
-        second_low_holds = second_low >= first_low * 0.97
+    candidate = _double_bottom_candidate(enriched)
+    if candidate is not None:
+        support = float(candidate["second_low"])
+        stop_loss = support * 0.97
+        recent_high = candidate["recent_high"]
         recovers_ma5 = _finite(ma5) and price > float(ma5)
+        breaks_recent_high = recent_high is not None and price > float(recent_high)
         no_heavy_break = True
         if _finite(vol20):
             recent = enriched.tail(10).copy()
             daily_drop = recent["close"].pct_change()
-            no_heavy_break = not bool(((daily_drop <= -0.03) & (recent["volume"] >= float(vol20) * 1.3)).any())
-        if second_low_holds and recovers_ma5 and no_heavy_break:
+            heavy_break = (
+                ((recent["close"] < float(candidate["first_low"]) * 0.99) & (recent["volume"] >= float(vol20) * 1.3))
+                | ((daily_drop <= -0.03) & (recent["volume"] >= float(vol20) * 1.3))
+            ).any()
+            no_heavy_break = not bool(heavy_break)
+
+        structure_signals = [
+            "近60日内形成两个间隔至少10日的低点",
+            "第二低点相对第一低点在 -1% 到 +3% 之间",
+            "双底中间反弹幅度至少6%",
+            "第二次回踩阶段量能弱于第一次下跌阶段",
+        ]
+        if recovers_ma5 and breaks_recent_high and no_heavy_break:
             group = "盘中触发" if mode == "intraday" else "触发买点"
-            support = second_low
-            stop_loss = support * 0.97
             return _result(
                 symbol=symbol,
                 name=name,
@@ -340,10 +573,28 @@ def evaluate_symbol(
                 latest_price=price,
                 support=support,
                 stop_loss=stop_loss,
-                signals=["第二个低点未有效跌破第一个低点", "价格重新站上 MA5"],
+                signals=structure_signals + ["价格重新站上 MA5", "突破第二低点后近5日高点"],
                 action="依托双底低点观察右侧延续",
                 invalid_if=f"跌破 {stop_loss:.3f}",
-                needs_close_confirmation=("收盘是否站上 MA5",) if mode == "intraday" else (),
+                needs_close_confirmation=("收盘是否站上 MA5", "收盘是否突破右侧小平台") if mode == "intraday" else (),
+            )
+
+        if no_heavy_break:
+            group = "盘中预警" if mode == "intraday" else "重点观察"
+            return _result(
+                symbol=symbol,
+                name=name,
+                instrument_type=instrument_type,
+                mode=mode,
+                group=group,
+                score=74,
+                setup="双底或二次压紧待确认",
+                latest_price=price,
+                support=support,
+                stop_loss=stop_loss,
+                signals=structure_signals,
+                action="等待站上 MA5 并突破右侧小平台",
+                invalid_if=f"跌破 {stop_loss:.3f}",
             )
 
     group = "盘中等待" if mode == "intraday" else "等待回调"

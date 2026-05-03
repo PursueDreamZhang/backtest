@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import inspect
 from typing import Callable
 
@@ -142,10 +142,17 @@ def _evaluate_one(
     symbols = [item.symbol for item in config.symbols]
 
     active_frame_loader = frame_loader or load_symbol_frames
+    prefer_cache_for_current_day = mode == "close_confirmed" and end_date == datetime.now().strftime("%Y%m%d")
+    history_end_date = end_date
+    if mode == "intraday" and end_date == datetime.now().strftime("%Y%m%d"):
+        history_end_date = (datetime.strptime(end_date, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
     if _accepts_keyword(active_frame_loader, "cache_only"):
-        frames = active_frame_loader(symbols, start_date, end_date, cache_only=cache_only)
+        frame_kwargs = {"cache_only": cache_only}
+        if prefer_cache_for_current_day and _accepts_keyword(active_frame_loader, "prefer_cache_for_current_day"):
+            frame_kwargs["prefer_cache_for_current_day"] = prefer_cache_for_current_day
+        frames = active_frame_loader(symbols, start_date, history_end_date, **frame_kwargs)
     else:
-        frames = active_frame_loader(symbols, start_date, end_date)
+        frames = active_frame_loader(symbols, start_date, history_end_date)
 
     quote_by_symbol = {}
     if mode == "intraday":
@@ -163,6 +170,7 @@ def _evaluate_one(
                 frame=frames[item.symbol],
                 mode=mode,
                 realtime_quote=quote_by_symbol.get(item.symbol),
+                expected_end_date=end_date,
             )
         )
 

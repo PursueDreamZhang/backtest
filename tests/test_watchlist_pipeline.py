@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -210,6 +211,131 @@ class WatchlistPipelineTests(unittest.TestCase):
             )
 
             self.assertEqual(captured["kwargs"], {"cache_only": True})
+
+    def test_should_prefer_cache_for_current_close_confirmed_day_when_supported(self):
+        closes = [10.0] * 80
+        frame = pd.DataFrame(
+            {
+                "open": closes,
+                "high": [10.2] * 80,
+                "low": [9.8] * 80,
+                "close": closes,
+                "volume": [1000] * 80,
+            },
+            index=pd.date_range("2026-01-01", periods=80),
+        )
+        captured = {}
+
+        def loader(symbols, start_date, end_date, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"159770": frame}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "watchlist.json"
+            config_path.write_text(
+                '{"direction":"机器人","symbols":[{"symbol":"159770","type":"etf"}]}',
+                encoding="utf-8",
+            )
+            today = datetime.now().strftime("%Y%m%d")
+
+            run_watchlist_strategy(
+                config_path=str(config_path),
+                output_dir=tmp,
+                start_date="20260101",
+                end_date=today,
+                mode="close_confirmed",
+                frame_loader=loader,
+                realtime_quote_loader=None,
+            )
+
+            self.assertEqual(captured["kwargs"], {"cache_only": False, "prefer_cache_for_current_day": True})
+
+    def test_should_load_intraday_history_only_through_previous_trading_day(self):
+        closes = [10.0] * 80
+        frame = pd.DataFrame(
+            {
+                "open": closes,
+                "high": [10.2] * 80,
+                "low": [9.8] * 80,
+                "close": closes,
+                "volume": [1000] * 80,
+            },
+            index=pd.date_range("2026-01-01", periods=80),
+        )
+        captured = {}
+
+        def loader(symbols, start_date, end_date, **kwargs):
+            captured["start_date"] = start_date
+            captured["end_date"] = end_date
+            captured["kwargs"] = kwargs
+            return {"159770": frame}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "watchlist.json"
+            config_path.write_text(
+                '{"direction":"机器人","symbols":[{"symbol":"159770","type":"etf"}]}',
+                encoding="utf-8",
+            )
+            today = datetime.now().strftime("%Y%m%d")
+            previous_day = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+
+            run_watchlist_strategy(
+                config_path=str(config_path),
+                output_dir=tmp,
+                start_date="20260101",
+                end_date=today,
+                mode="intraday",
+                frame_loader=loader,
+                realtime_quote_loader=lambda symbols: [
+                    {
+                        "symbol": "159770",
+                        "price": 10.0,
+                        "open": 10.0,
+                        "high": 10.1,
+                        "low": 9.9,
+                        "previous_close": 10.0,
+                        "volume": 1000,
+                    }
+                ],
+            )
+
+            self.assertEqual(captured["start_date"], "20260101")
+            self.assertEqual(captured["end_date"], previous_day)
+            self.assertEqual(captured["kwargs"], {"cache_only": False})
+
+    def test_should_skip_close_confirmed_symbol_when_current_day_data_is_missing(self):
+        closes = [10.0] * 80
+        frame = pd.DataFrame(
+            {
+                "open": closes,
+                "high": [10.2] * 80,
+                "low": [9.8] * 80,
+                "close": closes,
+                "volume": [1000] * 80,
+            },
+            index=pd.date_range("2026-01-01", periods=80),
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "watchlist.json"
+            config_path.write_text(
+                '{"direction":"机器人","symbols":[{"symbol":"159770","type":"etf"}]}',
+                encoding="utf-8",
+            )
+
+            result = run_watchlist_strategy(
+                config_path=str(config_path),
+                output_dir=tmp,
+                start_date="20260101",
+                end_date="20260430",
+                mode="close_confirmed",
+                frame_loader=lambda symbols, start_date, end_date: {"159770": frame},
+                realtime_quote_loader=None,
+            )
+
+            payload = json.loads(Path(result["json"]).read_text(encoding="utf-8"))
+            self.assertEqual(payload["items"][0]["group"], "数据不足")
+            self.assertEqual(payload["items"][0]["setup"], "缺少当日收盘数据")
 
     def test_should_run_multiple_watchlists_into_direction_subdirectories(self):
         closes = [10.0] * 80

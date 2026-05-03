@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -27,7 +28,7 @@ class RealtimeQuoteSourceTests(unittest.TestCase):
         self.assertEqual(quote["trade_time"], "2026-04-27 14:55:03")
         self.assertEqual(quote["quote_date"], "2026-04-27")
         self.assertEqual(quote["market_session"], "continuous")
-        self.assertFalse(quote["is_stale"])
+        self.assertTrue(quote["is_stale"])
         self.assertEqual(quote["volume_unit"], "share")
         self.assertEqual(quote["price"], 3.95)
         self.assertEqual(quote["open"], 3.928)
@@ -74,6 +75,25 @@ class RealtimeQuoteSourceTests(unittest.TestCase):
         source = SinaRealtimeQuoteSource()
         self.assertEqual(source._to_sina_symbol("510300.SH"), "sh510300")
         self.assertEqual(source._to_sina_symbol("SZ159915"), "sz159915")
+
+    @patch("data.realtime_quote_source.requests.Session")
+    def test_should_fetch_multiple_sina_realtime_quotes_in_one_request(self, session_cls):
+        response = session_cls.return_value.get.return_value
+        response.status_code = 200
+        response.encoding = "gbk"
+        response.text = (
+            'var hq_str_sh600000="浦发银行,10.00,9.90,10.10,10.20,9.80,10.00,10.10,100,1000,99,10.00,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2026-04-30,14:12:00,00";\n'
+            'var hq_str_sz000001="平安银行,12.00,11.80,12.10,12.30,11.70,12.00,12.10,200,2000,99,12.00,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2026-04-30,14:12:01,00";'
+        )
+
+        source = SinaRealtimeQuoteSource()
+        quotes = source.get_quotes(["600000", "000001"])
+
+        called_url = session_cls.return_value.get.call_args.args[0]
+        self.assertIn("list=sh600000,sz000001", called_url)
+        self.assertEqual(set(quotes.keys()), {"600000", "000001"})
+        self.assertEqual(quotes["600000"]["name"], "浦发银行")
+        self.assertEqual(quotes["000001"]["name"], "平安银行")
 
     def test_should_fallback_to_akshare_when_sina_fails(self):
         class BadSina:

@@ -17,6 +17,7 @@ def load_symbol_frames(
     *,
     use_cache: bool = True,
     cache_only: bool = False,
+    prefer_cache_for_current_day: bool = False,
     cache_dir: str | None = None,
     priority: list[str] | None = None,
 ):
@@ -24,13 +25,11 @@ def load_symbol_frames(
         priority=priority or DATA_SOURCE_PRIORITY,
         cache_dir=str(cache_dir or DEFAULT_CACHE_DIR),
     )
-    frames = {}
-    for symbol in symbols:
-        frames[symbol] = source.get_data(
-            symbol,
-            start_date,
-            end_date,
-            use_cache=use_cache,
-            cache_only=cache_only,
-        )
-    return frames
+    return source.get_data_batch(
+        symbols,
+        start_date,
+        end_date,
+        use_cache=use_cache,
+        cache_only=cache_only,
+        prefer_cache_for_current_day=prefer_cache_for_current_day,
+    )
