@@ -133,6 +133,50 @@ class WatchlistSignalTests(unittest.TestCase):
         self.assertEqual(result.group, "盘中失效")
         self.assertEqual(result.confidence, "provisional")
 
+    def test_should_mark_first_pullback_near_ma20_as_focus(self):
+        closes = [10.0] * 40 + [10.3, 10.6, 10.9, 11.2, 11.5, 11.8, 12.1, 12.4, 12.7, 13.0, 13.3, 13.6, 13.9, 14.2, 14.5, 14.3, 14.0, 13.7, 13.4, 13.0]
+        volumes = [1000] * 40 + [1400] * 10 + [1350, 1300, 1250, 1200, 1180, 1100, 1050, 980, 940, 900]
+
+        result = evaluate_symbol(
+            symbol="300124",
+            name="汇川技术",
+            instrument_type="stock",
+            frame=self._frame(closes, volumes),
+            mode="close_confirmed",
+        )
+
+        self.assertEqual(result.group, "重点观察")
+        self.assertEqual(result.setup, "MA20 第一次回档")
+
+    def test_should_trigger_close_confirmed_first_pullback_near_ma20_on_right_side_confirmation(self):
+        closes = [10.0] * 40 + [10.3, 10.6, 10.9, 11.2, 11.5, 11.8, 12.1, 12.4, 12.7, 13.0, 13.3, 13.6, 13.9, 14.2, 14.5, 12.7, 12.7, 12.7, 12.7, 12.8]
+        volumes = [1000] * 40 + [1400] * 15 + [1200, 1150, 1100, 1000, 950]
+
+        result = evaluate_symbol(
+            symbol="300124",
+            name="汇川技术",
+            instrument_type="stock",
+            frame=self._frame(closes, volumes),
+            mode="close_confirmed",
+        )
+
+        self.assertEqual(result.group, "触发买点")
+        self.assertEqual(result.setup, "MA20 第一次回档")
+
+    def test_should_not_treat_repeated_ma20_retests_as_first_pullback(self):
+        closes = [10.0] * 40 + [10.4, 10.8, 11.2, 11.6, 12.0, 12.4, 12.8, 13.2, 13.6, 14.0, 14.4, 14.8, 14.2, 13.6, 13.0, 12.6, 12.8, 13.2, 13.7, 14.1, 13.9, 13.5, 13.25, 13.1]
+        volumes = [1000] * 40 + [1450] * 10 + [1400, 1350, 1300, 1250, 1200, 1180, 1150, 1120, 1080, 1040, 1000, 980, 960, 940]
+
+        result = evaluate_symbol(
+            symbol="300750",
+            name="测试标的",
+            instrument_type="stock",
+            frame=self._frame(closes, volumes),
+            mode="close_confirmed",
+        )
+
+        self.assertNotEqual(result.setup, "MA20 第一次回档")
+
     def test_should_trigger_double_bottom_when_second_low_holds_and_recovers_ma5(self):
         closes = (
             [10.2] * 30

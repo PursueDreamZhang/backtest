@@ -7,6 +7,7 @@ import time
 
 import pandas as pd
 
+from local_env import load_local_env
 from .symbol_utils import infer_cn_exchange
 
 _LAST_DAILY_CALL_TS = 0.0
@@ -16,26 +17,8 @@ class TushareDataSource:
     """基于 Tushare Pro 的 A 股日线数据源。"""
 
     def _load_token_from_local_env(self) -> str:
-        local_env = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            'config',
-            'local.env',
-        )
-        if not os.path.exists(local_env):
-            return ''
-
-        try:
-            with open(local_env, 'r', encoding='utf-8') as f:
-                for raw in f:
-                    line = raw.strip()
-                    if not line or line.startswith('#') or '=' not in line:
-                        continue
-                    key, value = line.split('=', 1)
-                    if key.strip() == 'TUSHARE_TOKEN':
-                        return value.strip().strip('"').strip("'")
-        except Exception:
-            return ''
-        return ''
+        loaded = load_local_env()
+        return loaded.get('TUSHARE_TOKEN', '').strip()
 
     def _resolve_token(self) -> str:
         # 1) 优先环境变量
@@ -43,7 +26,13 @@ class TushareDataSource:
         if token:
             return token
 
-        # 2) 可选本地配置（不提交版本库）
+        # 2) 尝试从本地配置自动注入环境变量
+        load_local_env()
+        token = os.getenv('TUSHARE_TOKEN', '').strip()
+        if token:
+            return token
+
+        # 3) 兼容直接读取本地配置
         token = self._load_token_from_local_env()
         if token:
             return token
@@ -52,6 +41,10 @@ class TushareDataSource:
 
     def _to_ts_code(self, symbol: str) -> str:
         return f'{symbol}.{infer_cn_exchange(symbol)}'
+
+    def _prepare_tushare_env(self, token: str) -> None:
+        os.environ['TUSHARE_TOKEN'] = token
+        os.environ.setdefault('TS_TOKEN', token)
 
     def get_data(self, symbol: str, start_date: str, end_date: str, use_cache: bool = True) -> pd.DataFrame:
         global _LAST_DAILY_CALL_TS
@@ -63,7 +56,7 @@ class TushareDataSource:
         except Exception as e:
             raise RuntimeError(f'tushare 不可用: {e}') from e
 
-        ts.set_token(token)
+        self._prepare_tushare_env(token)
         pro = ts.pro_api()
 
         ts_code = self._to_ts_code(symbol)

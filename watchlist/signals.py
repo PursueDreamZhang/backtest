@@ -84,6 +84,18 @@ def _is_local_trough(frame: pd.DataFrame, index: int, span: int = 2) -> bool:
     return center == float(window.min())
 
 
+def _count_true_clusters(flags: list[bool]) -> int:
+    clusters = 0
+    in_cluster = False
+    for flag in flags:
+        if flag and not in_cluster:
+            clusters += 1
+            in_cluster = True
+        elif not flag:
+            in_cluster = False
+    return clusters
+
+
 def _double_bottom_candidate(frame: pd.DataFrame) -> dict[str, float | int] | None:
     last60 = frame.tail(60).reset_index(drop=True)
     if len(last60) < 40:
@@ -261,6 +273,26 @@ def _latest_values(frame: pd.DataFrame, mode: str, realtime_quote: dict | None) 
     }
 
 
+_ENRICHED_COLUMNS = {
+    "ma5",
+    "ma20",
+    "ma40",
+    "vol5",
+    "vol20",
+    "ret20",
+    "ret40",
+    "high20",
+    "low60",
+    "drawdown20",
+}
+
+
+def _ensure_enriched(frame: pd.DataFrame) -> pd.DataFrame:
+    if _ENRICHED_COLUMNS.issubset(frame.columns):
+        return frame
+    return enrich_daily_indicators(frame)
+
+
 def evaluate_symbol(
     *,
     symbol: str,
@@ -310,7 +342,7 @@ def evaluate_symbol(
                 invalid_if=f"补齐 {expected_ts.date().isoformat()} 收盘数据后重新评估",
             )
 
-    enriched = enrich_daily_indicators(frame)
+    enriched = _ensure_enriched(frame)
     values = _latest_values(enriched, mode, realtime_quote)
     price = values["price"]
     ma5 = values["ma5"]
@@ -386,10 +418,9 @@ def evaluate_symbol(
         support is not None
         and _finite(ma40)
         and ma40_recent_low is not None
-        and ma40_recent_low <= float(ma40) * 1.01
+        and ma40_recent_low <= float(ma40) * 1.05
         and ma40_recent_low >= float(ma40) * 0.97
-        and price >= float(ma40) * 0.99
-        and price <= float(ma40) * 1.04
+        and price >= float(ma40) * 0.97
     )
     drawdown20 = enriched.iloc[-1].get("drawdown20")
     had_pullback = _finite(drawdown20) and float(drawdown20) <= -0.05
@@ -398,14 +429,6 @@ def evaluate_symbol(
     range5 = ((recent5["high"] - recent5["low"]) / recent5["close"]).mean() if not recent5.empty else None
     range20 = ((recent20["high"] - recent20["low"]) / recent20["close"]).mean() if not recent20.empty else None
     volatility_compressed = _finite(range5) and _finite(range20) and float(range5) <= float(range20) * 0.9
-    no_heavy_break = True
-    if _finite(vol20) and not recent10.empty and recent10["ma40"].notna().all():
-        daily_drop = recent10["close"].pct_change()
-        heavy_break = (
-            ((recent10["close"] < recent10["ma40"] * 0.97) & (recent10["volume"] >= float(vol20) * 1.3))
-            | ((daily_drop <= -0.03) & (recent10["volume"] >= float(vol20) * 1.3))
-        ).any()
-        no_heavy_break = not bool(heavy_break)
     day_return = _pct_change(price, previous_close)
     turn_up = (
         _finite(ma5)
@@ -418,7 +441,7 @@ def evaluate_symbol(
         )
     )
 
-    if trend_selected and ma40_edge and had_pullback and shrink_volume and volatility_compressed and no_heavy_break:
+    if trend_selected and ma40_edge and had_pullback and shrink_volume and volatility_compressed:
         signals.extend(
             [
                 "近40日涨幅为正且 MA40 维持上行",
@@ -468,8 +491,50 @@ def evaluate_symbol(
     if _finite(ma20) and _finite(ma40) and float(ma20) > float(ma40):
         ma20_price = float(ma20)
         near_ma20 = ma20_price * 0.97 <= price <= ma20_price * 1.03
-        if near_ma20:
-            group = "盘中触发" if mode == "intraday" and turn_up else "盘中预警" if mode == "intraday" else "重点观察"
+        ret20 = enriched.iloc[-1].get("ret20")
+        ma20_trend_up = len(enriched) >= 6 and _finite(enriched.iloc[-6].get("ma20")) and ma20_price >= float(enriched.iloc[-6].get("ma20"))
+        trend_started = _finite(ret20) and float(ret20) >= 0.12 and ma20_trend_up
+        recent20_valid = recent20.dropna(subset=["ma20"])
+        stretch_flags: list[bool] = []
+        first_stretch_index = None
+        if not recent20_valid.empty:
+            stretch_flags = (recent20_valid["high"] >= recent20_valid["ma20"] * 1.08).tolist()
+            first_stretch_index = next((index for index, flag in enumerate(stretch_flags) if flag), None)
+        stretched_from_ma20 = first_stretch_index is not None
+        touch_window = recent20_valid.iloc[first_stretch_index + 1 :] if first_stretch_index is not None else pd.DataFrame()
+        touch_flags: list[bool] = []
+        current_touch = False
+        touch_clusters = 0
+        if not touch_window.empty:
+            touch_series = (touch_window["low"] <= touch_window["ma20"] * 1.03) & (touch_window["low"] >= touch_window["ma20"] * 0.97)
+            touch_flags = touch_series.tolist()
+            current_touch = bool(touch_flags[-1])
+            touch_clusters = _count_true_clusters(touch_flags)
+        pullback_low = float(recent3["low"].min()) if not recent3.empty else price
+        if mode == "intraday" and _finite(values["low"]):
+            pullback_low = min(pullback_low, float(values["low"]))
+        shallow_pullback = pullback_low >= ma20_price * 0.97
+        recent8_valid = enriched.tail(8).dropna(subset=["ma20"])
+        below_ma20_count = int((recent8_valid["close"] < recent8_valid["ma20"]).sum()) if not recent8_valid.empty else 0
+        limited_retests = below_ma20_count <= 2
+        no_heavy_ma20_break = True
+        if _finite(vol20):
+            recent10_valid = recent10.dropna(subset=["ma20"]).copy()
+            daily_drop = recent10_valid["close"].pct_change()
+            heavy_break = (
+                ((recent10_valid["close"] < recent10_valid["ma20"] * 0.97) & (recent10_valid["volume"] >= float(vol20) * 1.3))
+                | ((daily_drop <= -0.03) & (recent10_valid["volume"] >= float(vol20) * 1.3))
+            ).any()
+            no_heavy_ma20_break = not bool(heavy_break)
+        first_pullback = trend_started and stretched_from_ma20 and current_touch and touch_clusters == 1 and shallow_pullback and limited_retests and no_heavy_ma20_break
+        b_turn_up = (
+            (_finite(ma5) and price > float(ma5))
+            or (_finite(prior_high) and price > float(prior_high))
+        )
+        if near_ma20 and first_pullback:
+            group = "盘中预警" if mode == "intraday" else "重点观察"
+            if b_turn_up:
+                group = "盘中触发" if mode == "intraday" else "触发买点"
             return _result(
                 symbol=symbol,
                 name=name,
@@ -481,7 +546,12 @@ def evaluate_symbol(
                 latest_price=price,
                 support=ma20_price,
                 stop_loss=ma20_price * 0.95,
-                signals=["MA20 高于 MA40", "价格进入 MA20 附近"],
+                signals=[
+                    "MA20 高于 MA40 且继续上行",
+                    "近20日已有一段明显启动走势",
+                    "启动后首次回到 MA20 附近",
+                    "回踩未深度跌穿 MA20，且没有反复来回穿透",
+                ],
                 action="等待右侧确认" if "预警" in group or group == "重点观察" else "盘中优先盯",
                 invalid_if=f"跌破 {ma20_price * 0.95:.3f}",
                 needs_close_confirmation=("收盘是否站上 MA5",) if mode == "intraday" else (),

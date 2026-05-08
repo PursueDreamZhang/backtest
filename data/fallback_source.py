@@ -20,11 +20,13 @@ class FallbackDataSource:
     """按优先级依次尝试数据源，失败自动切换。"""
 
     REQUIRED_COLUMNS = ['open', 'high', 'low', 'close', 'volume']
+    DEMOTION_FAILURE_THRESHOLD = 5
 
     def __init__(self, priority: Iterable[str] | None = None, cache_dir: str | None = None):
         self.priority: List[str] = list(priority or ['tushare', 'sina', 'akshare', 'yfinance'])
         self.cache_dir = cache_dir or os.path.expanduser('~/.openclaw/workspace/backtest_cache')
         os.makedirs(self.cache_dir, exist_ok=True)
+        self._failure_streaks: dict[str, int] = {}
         self._registry = {
             'sina': SinaDataSource,
             'tushare': TushareDataSource,
@@ -39,6 +41,25 @@ class FallbackDataSource:
         preferred = ['yfinance']
         remaining = [name for name in self.priority if name not in preferred]
         return preferred + remaining
+
+    def _symbols_for_source(self, source_name: str, symbols: list[str]) -> list[str]:
+        if source_name != 'yfinance':
+            return list(symbols)
+        return [symbol for symbol in symbols if is_probable_etf(symbol)]
+
+    def _ordered_sources(self, names: list[str]) -> list[str]:
+        preferred = [name for name in names if self._failure_streaks.get(name, 0) < self.DEMOTION_FAILURE_THRESHOLD]
+        demoted = [name for name in names if self._failure_streaks.get(name, 0) >= self.DEMOTION_FAILURE_THRESHOLD]
+        return preferred + demoted
+
+    def _ordered_sources_for_symbol(self, symbol: str) -> list[str]:
+        return self._ordered_sources(self._priority_for_symbol(symbol))
+
+    def _mark_source_success(self, source_name: str) -> None:
+        self._failure_streaks[source_name] = 0
+
+    def _mark_source_failure(self, source_name: str) -> None:
+        self._failure_streaks[source_name] = self._failure_streaks.get(source_name, 0) + 1
 
     def _normalize_frame(self, df: pd.DataFrame) -> pd.DataFrame:
         if df is None or df.empty:
@@ -86,7 +107,7 @@ class FallbackDataSource:
 
     def _fetch_with_fallback(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
         errors: List[str] = []
-        for name in self._priority_for_symbol(symbol):
+        for name in self._ordered_sources_for_symbol(symbol):
             source_cls = self._registry.get(name)
             if source_cls is None:
                 errors.append(f'{name}: 未注册数据源')
@@ -100,9 +121,11 @@ class FallbackDataSource:
                 df = self._normalize_frame(df)
                 if self._has_suspiciously_short_history(df, start_date, end_date):
                     raise RuntimeError(f'历史数据过短: {len(df)} 条')
+                self._mark_source_success(name)
                 print(f'数据源 {name} 获取成功')
                 return df
             except Exception as e:
+                self._mark_source_failure(name)
                 msg = f'{name} 失败: {e}'
                 errors.append(msg)
                 print(msg)
@@ -119,6 +142,20 @@ class FallbackDataSource:
             return df
         end = pd.Timestamp(f'{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}')
         return df.loc[:end]
+
+    def _can_serve_effective_range_from_cache(
+        self,
+        df: pd.DataFrame | None,
+        start_date: str,
+        end_date: str,
+    ) -> bool:
+        if df is None or df.empty:
+            return False
+        sliced = self._slice(df, start_date, end_date)
+        if sliced.empty:
+            return False
+        req_end = pd.Timestamp(f'{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}')
+        return df.index.max().normalize() >= req_end
 
     def _has_cached_current_day(self, df: pd.DataFrame, end_date: str) -> bool:
         if df is None or df.empty:
@@ -161,19 +198,24 @@ class FallbackDataSource:
         if not use_cache:
             results: dict[str, pd.DataFrame] = {}
             remaining = list(unique_symbols)
-            for name in self.priority:
+            for name in self._ordered_sources(list(self.priority)):
                 source_cls = self._registry.get(name)
                 if source_cls is None or not remaining:
+                    continue
+                eligible_symbols = self._symbols_for_source(name, remaining)
+                if not eligible_symbols:
                     continue
                 source = source_cls()
                 if not hasattr(source, 'get_data_batch'):
                     continue
                 try:
                     print(f'尝试批量数据源: {name}')
-                    raw_frames = source.get_data_batch(remaining, start_date, end_date, use_cache=False)
+                    raw_frames = source.get_data_batch(eligible_symbols, start_date, end_date, use_cache=False)
                 except Exception as e:
+                    self._mark_source_failure(name)
                     print(f'{name} 批量失败: {e}')
                     continue
+                batch_success = False
                 next_remaining: list[str] = []
                 for symbol in remaining:
                     raw_frame = raw_frames.get(symbol)
@@ -185,9 +227,14 @@ class FallbackDataSource:
                         if self._has_suspiciously_short_history(frame, start_date, end_date):
                             raise RuntimeError(f'历史数据过短: {len(frame)} 条')
                         results[symbol] = frame
+                        batch_success = True
                     except Exception as e:
                         print(f'{name} 批量 {symbol} 失败: {e}')
                         next_remaining.append(symbol)
+                if batch_success:
+                    self._mark_source_success(name)
+                else:
+                    self._mark_source_failure(name)
                 remaining = next_remaining
             for symbol in remaining:
                 results[symbol] = self.get_data(symbol, start_date, end_date, use_cache=False)
@@ -230,23 +277,33 @@ class FallbackDataSource:
                 print(f'返回区间数据: {len(result)} 条')
                 results[symbol] = result
                 continue
+            if self._can_serve_effective_range_from_cache(cached_df, start_date, end_date):
+                result = self._slice(cached_df, start_date, end_date)
+                print(f'缓存已覆盖有效区间数据: {len(result)} 条')
+                results[symbol] = result
+                continue
             pending_fetch.append(symbol)
 
         remaining = list(pending_fetch)
-        for name in self.priority:
+        for name in self._ordered_sources(list(self.priority)):
             source_cls = self._registry.get(name)
             if source_cls is None or not remaining:
+                continue
+            eligible_symbols = self._symbols_for_source(name, remaining)
+            if not eligible_symbols:
                 continue
             source = source_cls()
             if not hasattr(source, 'get_data_batch'):
                 continue
             try:
                 print(f'尝试批量数据源: {name}')
-                raw_frames = source.get_data_batch(remaining, start_date, end_date, use_cache=False)
+                raw_frames = source.get_data_batch(eligible_symbols, start_date, end_date, use_cache=False)
             except Exception as e:
+                self._mark_source_failure(name)
                 print(f'{name} 批量失败: {e}')
                 continue
 
+            batch_success = False
             next_remaining: list[str] = []
             for symbol in remaining:
                 raw_frame = raw_frames.get(symbol)
@@ -264,9 +321,14 @@ class FallbackDataSource:
                     result = self._slice(merged, start_date, end_date)
                     print(f'返回区间数据: {len(result)} 条')
                     results[symbol] = result
+                    batch_success = True
                 except Exception as e:
                     print(f'{name} 批量 {symbol} 失败: {e}')
                     next_remaining.append(symbol)
+            if batch_success:
+                self._mark_source_success(name)
+            else:
+                self._mark_source_failure(name)
             remaining = next_remaining
 
         for symbol in remaining:
@@ -317,6 +379,11 @@ class FallbackDataSource:
         ):
             result = self._slice(merged, start_date, end_date)
             print(f'优先使用当日收盘缓存: {len(result)} 条')
+            return result
+
+        if self._can_serve_effective_range_from_cache(merged, start_date, end_date):
+            result = self._slice(merged, start_date, end_date)
+            print(f'缓存已覆盖有效区间数据: {len(result)} 条')
             return result
 
         # 向前补齐（请求更早的时间）

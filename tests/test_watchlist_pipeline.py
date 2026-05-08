@@ -384,6 +384,120 @@ class WatchlistPipelineTests(unittest.TestCase):
             self.assertTrue(Path(result["overview"]["markdown"]).exists())
             self.assertTrue(Path(result["overview"]["html"]).exists())
 
+    def test_should_load_shared_frames_once_for_multiple_watchlists(self):
+        closes = [10.0] * 80
+        frame = pd.DataFrame(
+            {
+                "open": closes,
+                "high": [10.2] * 80,
+                "low": [9.8] * 80,
+                "close": closes,
+                "volume": [1000] * 80,
+            },
+            index=pd.date_range("2026-01-01", periods=80),
+        )
+        calls = []
+
+        def loader(symbols, start_date, end_date, **kwargs):
+            calls.append((list(symbols), start_date, end_date, kwargs))
+            return {
+                "688012": frame,
+                "001270": frame,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "watchlists.json"
+            config_path.write_text(
+                """
+                {
+                  "watchlists": [
+                    {"direction":"半导体","symbols":[{"symbol":"688012","type":"stock"},{"symbol":"001270","type":"stock"}]},
+                    {"direction":"商业航天","symbols":[{"symbol":"001270","type":"stock"}]}
+                  ]
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            run_watchlist_strategy(
+                config_path=str(config_path),
+                output_dir=tmp,
+                start_date="20260101",
+                end_date="20260427",
+                mode="close_confirmed",
+                frame_loader=loader,
+                realtime_quote_loader=None,
+            )
+
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][0], ["688012", "001270"])
+
+    def test_should_load_shared_quotes_once_for_multiple_intraday_watchlists(self):
+        closes = [10.0] * 80
+        frame = pd.DataFrame(
+            {
+                "open": closes,
+                "high": [10.2] * 80,
+                "low": [9.8] * 80,
+                "close": closes,
+                "volume": [1000] * 80,
+            },
+            index=pd.date_range("2026-01-01", periods=80),
+        )
+        quote_calls = []
+
+        def quote_loader(symbols):
+            quote_calls.append(list(symbols))
+            return [
+                {
+                    "symbol": "688012",
+                    "price": 10.0,
+                    "open": 10.0,
+                    "high": 10.1,
+                    "low": 9.9,
+                    "previous_close": 10.0,
+                    "volume": 1000,
+                },
+                {
+                    "symbol": "001270",
+                    "price": 10.0,
+                    "open": 10.0,
+                    "high": 10.1,
+                    "low": 9.9,
+                    "previous_close": 10.0,
+                    "volume": 1000,
+                },
+            ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "watchlists.json"
+            config_path.write_text(
+                """
+                {
+                  "watchlists": [
+                    {"direction":"半导体","symbols":[{"symbol":"688012","type":"stock"},{"symbol":"001270","type":"stock"}]},
+                    {"direction":"商业航天","symbols":[{"symbol":"001270","type":"stock"}]}
+                  ]
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            run_watchlist_strategy(
+                config_path=str(config_path),
+                output_dir=tmp,
+                start_date="20260101",
+                end_date=datetime.now().strftime("%Y%m%d"),
+                mode="intraday",
+                frame_loader=lambda symbols, start_date, end_date, **kwargs: {
+                    "688012": frame,
+                    "001270": frame,
+                },
+                realtime_quote_loader=quote_loader,
+            )
+
+            self.assertEqual(quote_calls, [["688012", "001270"]])
+
 
 if __name__ == "__main__":
     unittest.main()
