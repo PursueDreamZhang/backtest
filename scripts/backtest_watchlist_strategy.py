@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--max-positions", type=int, default=8)
     parser.add_argument("--position-size-pct", type=float, default=0.10)
     parser.add_argument("--max-hold-days", type=int, default=10)
+    parser.add_argument("--mode", choices=["close_confirmed", "price_touch_tplus1"], default="close_confirmed")
     args = parser.parse_args()
 
     result = run_watchlist_backtest(
@@ -33,10 +34,10 @@ def main():
         max_positions=args.max_positions,
         position_size_pct=args.position_size_pct,
         max_hold_days=args.max_hold_days,
+        mode=args.mode,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
     main()
-

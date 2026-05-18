@@ -205,3 +205,160 @@ class WatchlistBacktestEngineTests(unittest.TestCase):
 
             summary = json.loads(Path(result["summary"]).read_text(encoding="utf-8"))
             self.assertEqual(summary["交易笔数"], 0)
+
+    def test_should_fill_price_touch_entry_and_stop_on_next_day_open(self):
+        diary = pd.DataFrame(
+            [
+                {
+                    "trade_date": "20260401",
+                    "symbol": "000001",
+                    "name": "测试标的",
+                    "direction": "测试方向",
+                    "thesis": "测试逻辑",
+                    "group": "触发买点",
+                    "setup": "整理后第一根启动阳线",
+                    "score": 80,
+                    "latest_price": 10.0,
+                    "support": 9.6,
+                    "stop_loss": 9.5,
+                    "risk_to_stop_pct": 5.26,
+                    "trigger_price": 10.5,
+                    "trigger_price_rule": "prev_close_x_1.05",
+                    "action": "次日盘中触价试仓",
+                },
+                {
+                    "trade_date": "20260402",
+                    "symbol": "000001",
+                    "name": "测试标的",
+                    "direction": "测试方向",
+                    "thesis": "测试逻辑",
+                    "group": "重点观察",
+                    "setup": "整理后第一根启动阳线",
+                    "score": 68,
+                    "latest_price": 10.2,
+                    "support": 9.6,
+                    "stop_loss": 9.5,
+                    "risk_to_stop_pct": 7.37,
+                    "trigger_price": None,
+                    "trigger_price_rule": None,
+                    "action": "观察右侧确认",
+                },
+                {
+                    "trade_date": "20260403",
+                    "symbol": "000001",
+                    "name": "测试标的",
+                    "direction": "测试方向",
+                    "thesis": "测试逻辑",
+                    "group": "重点观察",
+                    "setup": "整理后第一根启动阳线",
+                    "score": 66,
+                    "latest_price": 9.1,
+                    "support": 9.2,
+                    "stop_loss": 9.5,
+                    "risk_to_stop_pct": -4.21,
+                    "trigger_price": None,
+                    "trigger_price_rule": None,
+                    "action": "跌破则走",
+                },
+            ]
+        )
+        frames = {
+            "000001": pd.DataFrame(
+                [
+                    {"open": 10.0, "high": 10.1, "low": 9.8, "close": 10.0},
+                    {"open": 10.0, "high": 10.8, "low": 9.4, "close": 10.2},
+                    {"open": 9.2, "high": 9.4, "low": 8.9, "close": 9.1},
+                ],
+                index=pd.to_datetime(["2026-04-01", "2026-04-02", "2026-04-03"]),
+            )
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("watchlist_backtest.engine.build_signal_diary", return_value=(diary, frames)):
+                result = run_watchlist_backtest(
+                    config_path="/tmp/ignored.json",
+                    start_date="20260401",
+                    end_date="20260403",
+                    output_dir=tmp,
+                    initial_cash=100000,
+                    max_positions=1,
+                    position_size_pct=0.5,
+                    max_hold_days=10,
+                    mode="price_touch_tplus1",
+                )
+
+            trades = pd.read_csv(result["trades"])
+            self.assertEqual(len(trades), 1)
+            self.assertEqual(int(trades.iloc[0]["买入日"]), 20260402)
+            self.assertEqual(trades.iloc[0]["卖出原因"], "触发止损")
+            self.assertAlmostEqual(float(trades.iloc[0]["买入价"]), 10.5 * 1.002, places=6)
+            self.assertAlmostEqual(float(trades.iloc[0]["卖出价"]), 9.2 * (1 - 0.002), places=6)
+
+    def test_should_not_stop_on_entry_day_for_price_touch_mode(self):
+        diary = pd.DataFrame(
+            [
+                {
+                    "trade_date": "20260401",
+                    "symbol": "000001",
+                    "name": "测试标的",
+                    "direction": "测试方向",
+                    "thesis": "测试逻辑",
+                    "group": "触发买点",
+                    "setup": "双底或二次压紧",
+                    "score": 82,
+                    "latest_price": 10.0,
+                    "support": 9.6,
+                    "stop_loss": 9.5,
+                    "risk_to_stop_pct": 5.26,
+                    "trigger_price": 10.5,
+                    "trigger_price_rule": "prev_close_x_1.05",
+                    "action": "次日盘中触价试仓",
+                },
+                {
+                    "trade_date": "20260402",
+                    "symbol": "000001",
+                    "name": "测试标的",
+                    "direction": "测试方向",
+                    "thesis": "测试逻辑",
+                    "group": "重点观察",
+                    "setup": "双底或二次压紧",
+                    "score": 70,
+                    "latest_price": 9.8,
+                    "support": 9.6,
+                    "stop_loss": 9.5,
+                    "risk_to_stop_pct": 3.16,
+                    "trigger_price": None,
+                    "trigger_price_rule": None,
+                    "action": "持有观察",
+                },
+            ]
+        )
+        frames = {
+            "000001": pd.DataFrame(
+                [
+                    {"open": 10.0, "high": 10.1, "low": 9.8, "close": 10.0},
+                    {"open": 10.0, "high": 10.8, "low": 9.2, "close": 9.8},
+                ],
+                index=pd.to_datetime(["2026-04-01", "2026-04-02"]),
+            )
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("watchlist_backtest.engine.build_signal_diary", return_value=(diary, frames)):
+                result = run_watchlist_backtest(
+                    config_path="/tmp/ignored.json",
+                    start_date="20260401",
+                    end_date="20260402",
+                    output_dir=tmp,
+                    initial_cash=100000,
+                    max_positions=1,
+                    position_size_pct=0.5,
+                    max_hold_days=10,
+                    mode="price_touch_tplus1",
+                )
+
+            trades = pd.read_csv(result["trades"])
+            self.assertEqual(len(trades), 0)
+
+            equity = pd.read_csv(result["equity_curve"])
+            self.assertEqual(int(equity.iloc[-1]["持仓数量"]), 1)

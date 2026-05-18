@@ -39,6 +39,8 @@ DIARY_COLUMNS = [
     "support",
     "stop_loss",
     "risk_to_stop_pct",
+    "trigger_price",
+    "trigger_price_rule",
     "action",
 ]
 
@@ -81,6 +83,8 @@ DIARY_COLUMN_LABELS = {
     "support": "支撑位",
     "stop_loss": "止损位",
     "risk_to_stop_pct": "距离止损风险(%)",
+    "trigger_price": "触发价",
+    "trigger_price_rule": "触发价规则",
     "action": "动作",
 }
 

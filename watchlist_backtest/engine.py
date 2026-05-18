@@ -8,8 +8,16 @@ import pandas as pd
 
 from .portfolio import Portfolio
 from .reporting import build_summary, write_backtest_reports
-from .rules import rank_candidates, should_close_position, should_open_position
+from .rules import (
+    rank_candidates,
+    should_close_position,
+    should_close_position_tplus1,
+    should_open_position,
+    should_open_position_by_price_touch,
+)
 from .signal_diary import build_signal_diary
+
+BACKTEST_MODES = {"close_confirmed", "price_touch_tplus1"}
 
 
 def _trade_calendar(frames: dict[str, pd.DataFrame], start_date: str, end_date: str) -> list[str]:
@@ -43,7 +51,11 @@ def run_watchlist_backtest(
     fee_rate: float = 0.0003,
     sell_tax_rate: float = 0.001,
     slippage_rate: float = 0.002,
+    mode: str = "close_confirmed",
 ) -> dict[str, str]:
+    if mode not in BACKTEST_MODES:
+        raise ValueError(f"mode must be one of {sorted(BACKTEST_MODES)}")
+
     signal_diary, frames = build_signal_diary(config_path, start_date, end_date)
     calendar = _trade_calendar(frames, start_date, end_date)
     signal_by_date: dict[str, list[dict]] = defaultdict(list)
@@ -66,12 +78,20 @@ def run_watchlist_backtest(
             position.holding_days += 1
             market = _market_row(frames[symbol], trade_date)
             latest_signal = signal_by_date_symbol.get((trade_date, symbol))
-            decision = should_close_position(
-                asdict(position),
-                market,
-                latest_signal,
-                max_hold_days=max_hold_days,
-            )
+            if mode == "price_touch_tplus1":
+                decision = should_close_position_tplus1(
+                    asdict(position),
+                    market,
+                    latest_signal,
+                    max_hold_days=max_hold_days,
+                )
+            else:
+                decision = should_close_position(
+                    asdict(position),
+                    market,
+                    latest_signal,
+                    max_hold_days=max_hold_days,
+                )
             if decision.should_close and decision.exit_price is not None:
                 portfolio.close_position(
                     symbol,
@@ -80,7 +100,7 @@ def run_watchlist_backtest(
                     exit_reason=decision.reason,
                 )
 
-        # Then process entries from previous signal day at today's open.
+        # Then process entries from previous signal day.
         if trade_index > 0:
             prev_trade_date = calendar[trade_index - 1]
             candidates: list[tuple[dict, float]] = []
@@ -89,19 +109,22 @@ def run_watchlist_backtest(
                 if portfolio.has_position(symbol):
                     continue
                 market = _market_row(frames[symbol], trade_date)
-                next_open = None if market is None else market.get("open")
-                decision = should_open_position(signal_row, next_open)
+                if mode == "price_touch_tplus1":
+                    decision = should_open_position_by_price_touch(signal_row, market)
+                else:
+                    next_open = None if market is None else market.get("open")
+                    decision = should_open_position(signal_row, next_open)
                 if decision.allowed:
-                    candidates.append((signal_row, float(next_open)))
+                    candidates.append((signal_row, float(decision.entry_price)))
 
             available_slots = max(0, max_positions - len(portfolio.positions))
             target_capital = initial_cash * position_size_pct
-            open_price_by_symbol = {
-                candidate_row["symbol"]: open_price for candidate_row, open_price in candidates
+            entry_price_by_symbol = {
+                candidate_row["symbol"]: entry_price for candidate_row, entry_price in candidates
             }
             ranked_candidates = rank_candidates([item[0] for item in candidates])[:available_slots]
             for signal_row in ranked_candidates:
-                market_open = open_price_by_symbol[signal_row["symbol"]]
+                entry_price = entry_price_by_symbol[signal_row["symbol"]]
                 portfolio.open_position(
                     symbol=signal_row["symbol"],
                     name=signal_row["name"],
@@ -109,7 +132,7 @@ def run_watchlist_backtest(
                     setup=signal_row["setup"],
                     signal_date=prev_trade_date,
                     entry_date=trade_date,
-                    open_price=market_open,
+                    open_price=entry_price,
                     stop_loss=float(signal_row["stop_loss"]),
                     target_capital=target_capital,
                 )

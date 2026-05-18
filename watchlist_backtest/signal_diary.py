@@ -15,6 +15,12 @@ from watchlist.signals import evaluate_symbol
 SIGNAL_LOOKBACK_ROWS = 140
 DEFAULT_MAX_WORKERS = max(1, min(8, (os.cpu_count() or 2) - 1))
 
+FIVE_PERCENT_TRIGGER_SETUPS = {
+    "MA40 弹簧压紧后松开",
+    "整理后第一根启动阳线",
+    "双底或二次压紧",
+}
+
 
 def load_watchlist_frames(
     config_path: str,
@@ -42,6 +48,27 @@ def load_watchlist_frames(
     return configs, symbol_meta, direction_by_symbol, frames
 
 
+def compute_trigger_price(signal_row: dict, frame: pd.DataFrame) -> tuple[float | None, str | None]:
+    if signal_row.get("group") != "触发买点" or frame.empty:
+        return None, None
+
+    setup = signal_row.get("setup")
+    latest_row = frame.iloc[-1]
+    if setup in FIVE_PERCENT_TRIGGER_SETUPS:
+        latest_price = signal_row.get("latest_price", latest_row.get("close"))
+        if latest_price is None or pd.isna(latest_price):
+            return None, None
+        return round(float(latest_price) * 1.05, 6), "prev_close_x_1.05"
+
+    if setup == "MA20 第一次回档":
+        ma20 = latest_row.get("ma20")
+        if ma20 is None or pd.isna(ma20):
+            return None, None
+        return round(float(ma20), 6), "signal_day_ma20"
+
+    return None, None
+
+
 def _build_symbol_rows(task: tuple[str, dict, list[dict], pd.DataFrame, str, str]) -> list[dict]:
     symbol, base, contexts, frame, start_date, end_date = task
     full_frame = enrich_daily_indicators(frame.sort_index())
@@ -64,6 +91,9 @@ def _build_symbol_rows(task: tuple[str, dict, list[dict], pd.DataFrame, str, str
         )
         base_row = asdict(result)
         base_row["trade_date"] = trade_date
+        trigger_price, trigger_price_rule = compute_trigger_price(base_row, sliced)
+        base_row["trigger_price"] = trigger_price
+        base_row["trigger_price_rule"] = trigger_price_rule
         for context in contexts:
             row = dict(base_row)
             row["direction"] = context["direction"]
